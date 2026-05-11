@@ -1,6 +1,16 @@
+[workspace]
+members = ["crates/macros"]
+
+[workspace.dependencies]
+ferisc-macros = { path = "crates/macros" }
+
 [package]
 name = "ferisc"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+ferisc-macros = { workspace = true }
+strum = { version = "0.28.0", features = ["derive"] }
+generic-array = "1.4.1"
+bitflags = "2.11.1"
