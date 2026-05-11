@@ -1,7 +1,9 @@
 pub use self::buf::Buf;
+pub use self::queue::Queue;
 pub use self::stage::{CircuitLock, PipelineStage, Transformer};
 
 mod buf;
+mod queue;
 mod stage;
 
 /// A trait for a clock-based circuit.
