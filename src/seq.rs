@@ -1,6 +1,8 @@
 pub use self::buf::Buf;
+pub use self::stage::{CircuitLock, PipelineStage, Transformer};
 
 mod buf;
+mod stage;
 
 /// A trait for a clock-based circuit.
 pub trait Sequential {
