@@ -1,15 +1,17 @@
 pub use self::lock::FetchLock;
-use super::AddrGenLock;
-use crate::core::uop::fetch::BtbPred;
-use crate::mem::{Addr, LdReq, Mem, MemConn, MemErr, ReqData, ReqHandle};
+use super::{AddrGenLock, predecode::PredecodeLock};
+use crate::core::uop::{fetch::BtbPred, predecode::Predecoded};
+use crate::mem::{LdReq, Mem, MemConn, MemErr, ReqData, ReqHandle};
 use crate::seq::Sequential;
+use std::collections::VecDeque;
 
 mod lock;
 
+#[derive(Debug)]
 pub struct FetchUnit<C = MemConn, H = ReqHandle> {
     mem_conn: C,
     req: Option<(H, BtbPred)>,
-    last: Option<(Addr, Result<ReqData, MemErr>, BtbPred)>,
+    out_queue: VecDeque<Predecoded>,
     pkt_width: usize,
     flushed: bool,
     #[cfg(debug_assertions)]
@@ -24,7 +26,7 @@ impl<C, H> FetchUnit<C, H> {
         Self {
             mem_conn: mem.register_conn(),
             req: None,
-            last: None,
+            out_queue: VecDeque::new(),
             pkt_width,
             flushed: false,
             #[cfg(debug_assertions)]
@@ -32,18 +34,19 @@ impl<C, H> FetchUnit<C, H> {
         }
     }
 
-    pub fn fetch<'f, 'm, 'a, 'g, M>(
+    pub fn fetch<'f, 'm, 'a, 'g, 'd, M>(
         &'f mut self,
         mem: &'m mut M,
         addr_gen: &'a mut AddrGenLock<'g>,
-    ) -> FetchLock<'f, 'm, 'a, 'g, M>
+        predecode: PredecodeLock<'d>,
+    ) -> FetchLock<'f, 'm, 'a, 'g, 'd, M>
     where
         M: Mem<LdReq<MemErr>, Conn = C, Handle = H, Output = Result<ReqData, MemErr>>,
     {
         #[cfg(debug_assertions)]
         assert!(!self.fetched, "cannot fetch more than once per clock cycle");
         assert!(!self.flushed, "cannot fetch after flushing");
-        FetchLock::new(self, mem, addr_gen)
+        FetchLock::new(self, mem, addr_gen, predecode)
     }
 
     pub fn clear<M>(&mut self, mem: &mut M)

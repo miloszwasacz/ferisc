@@ -4,3 +4,4 @@ pub use self::addr_gen::{AddrGen, AddrGenLock};
 
 mod addr_gen;
 pub mod fetch;
+pub mod predecode;

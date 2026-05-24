@@ -1,4 +1,4 @@
-use crate::mem::Addr;
+use crate::mem::{Addr, MemErr};
 use std::sync::Arc;
 
 pub type BtbPred = Option<Addr>;
@@ -6,6 +6,6 @@ pub type BtbPred = Option<Addr>;
 #[derive(Debug, Clone)]
 pub struct FetchPacket {
     pub addr: Addr,
-    pub bytes: Arc<[u8]>,
+    pub bytes: Result<Arc<[u8]>, MemErr>,
     pub btb_pred: BtbPred,
 }

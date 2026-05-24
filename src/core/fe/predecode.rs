@@ -1,0 +1,115 @@
+pub use self::lock::PredecodeLock;
+use crate::seq::{Buf, Clearable, Sequential};
+
+type CrossBlock = Option<[u8; 2]>;
+
+#[derive(Debug, Default)]
+pub struct Predecoder(Buf<CrossBlock>);
+
+impl Predecoder {
+    pub fn lock(&mut self) -> PredecodeLock<'_> {
+        let cross = self.0.read_copied();
+        PredecodeLock(self, cross)
+    }
+}
+
+impl Sequential for Predecoder {
+    fn finish_cycle(&mut self) {
+        self.0.finish_cycle();
+    }
+}
+
+impl Clearable for Predecoder {
+    fn clear(&mut self) {
+        self.0.clear();
+    }
+}
+
+mod lock {
+    use super::*;
+    use crate::core::uop::{
+        fetch::FetchPacket,
+        predecode::{PdcdBytes, Predecoded},
+    };
+    use crate::mem::Addr;
+    use std::collections::VecDeque;
+
+    pub struct PredecodeLock<'a>(pub(super) &'a mut Predecoder, pub(super) CrossBlock);
+
+    impl PredecodeLock<'_> {
+        pub fn transform(&mut self, packet: FetchPacket) -> VecDeque<Predecoded> {
+            let FetchPacket {
+                mut addr,
+                bytes,
+                btb_pred,
+            } = packet;
+
+            let mut out = VecDeque::new();
+            let bytes_owned = match bytes {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    return [Predecoded {
+                        addr,
+                        bytes: Err(err),
+                        btb_pred,
+                    }]
+                    .into();
+                }
+            };
+            let mut bytes = bytes_owned.as_ref();
+            debug_assert!(bytes.len().is_multiple_of(2));
+
+            if let Some(half) = self.1.take() {
+                debug_assert!(bytes.len() >= 2);
+                let hi = u16::from_le_bytes([bytes[0], bytes[1]]) as u32;
+                let lo = u16::from_le_bytes(half) as u32;
+
+                out.push_back(Predecoded {
+                    addr: addr - 2,
+                    bytes: Ok(PdcdBytes::Normal((hi << 16) | lo)),
+                    //TODO BTB prediction
+                    btb_pred: None,
+                });
+                addr += 2;
+                bytes = &bytes[2..];
+            }
+
+            while bytes.len() >= 2 {
+                let (pdcd, len) = if bytes[0] & 0b11 == 0b11 {
+                    let len = 4;
+                    if bytes.len() < len {
+                        self.1 = Some([bytes[0], bytes[1]]);
+                        break;
+                    }
+
+                    let bytes = u32::from_le_bytes(bytes[..len].try_into().unwrap());
+                    (PdcdBytes::Normal(bytes), len)
+                } else {
+                    let len = 2;
+                    let bytes = u16::from_le_bytes(bytes[..len].try_into().unwrap());
+                    (PdcdBytes::Compressed(bytes), len)
+                };
+
+                out.push_back(Predecoded {
+                    addr,
+                    bytes: Ok(pdcd),
+                    //TODO BTB prediction
+                    btb_pred: None,
+                });
+                addr += len as Addr;
+                bytes = &bytes[len..];
+            }
+            out
+        }
+
+        pub fn forget(self) {
+            let Self(_, _) = self;
+        }
+    }
+
+    impl Drop for PredecodeLock<'_> {
+        fn drop(&mut self) {
+            self.0.0.write(self.1);
+        }
+    }
+}

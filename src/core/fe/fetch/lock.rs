@@ -1,20 +1,31 @@
 use super::FetchUnit;
-use crate::core::{fe::AddrGenLock, uop::fetch::FetchPacket};
+use crate::core::{
+    fe::{AddrGenLock, predecode::PredecodeLock},
+    uop::{fetch::FetchPacket, predecode::Predecoded},
+};
 use crate::mem::{Addr, LdReq, Mem, MemErr, ReqData};
 use crate::seq::{CircuitLock, Transformer};
+use std::collections::vec_deque::Iter;
 use std::marker::PhantomData;
 
-pub struct FetchLock<'u, 'm, 'a, 'g, M>
+pub struct FetchLock<'u, 'm, 'a, 'g, 'd, M>(Option<LockImpl<'u, 'm, 'a, 'g, 'd, M>>)
+where
+    M: Mem<LdReq<MemErr>, Output = Result<ReqData, MemErr>>;
+
+struct LockImpl<'u, 'm, 'a, 'g, 'd, M>
 where
     M: Mem<LdReq<MemErr>, Output = Result<ReqData, MemErr>>,
 {
-    unit: &'u mut FetchUnit<M::Conn, M::Handle>,
+    unit: *mut FetchUnit<M::Conn, M::Handle>,
     mem: &'m mut M,
     addr_gen: &'a mut AddrGenLock<'g>,
-    commited: bool,
+    predecode: PredecodeLock<'d>,
+    iter: Iter<'u, Predecoded>,
+    popped: usize,
+    _unit: PhantomData<&'u mut FetchUnit<M::Conn, M::Handle>>,
 }
 
-impl<'u, 'm, 'a, 'g, M> FetchLock<'u, 'm, 'a, 'g, M>
+impl<'u, 'm, 'a, 'g, 'd, M> FetchLock<'u, 'm, 'a, 'g, 'd, M>
 where
     M: Mem<LdReq<MemErr>, Output = Result<ReqData, MemErr>>,
 {
@@ -22,109 +33,116 @@ where
         unit: &'u mut FetchUnit<M::Conn, M::Handle>,
         mem: &'m mut M,
         addr_gen: &'a mut AddrGenLock<'g>,
-    ) -> FetchLock<'u, 'm, 'a, 'g, M> {
-        Self {
-            unit,
+        predecode: PredecodeLock<'d>,
+    ) -> FetchLock<'u, 'm, 'a, 'g, 'd, M> {
+        Self(Some(LockImpl {
+            unit: unit as _,
             mem,
             addr_gen,
-            commited: false,
-        }
+            predecode,
+            iter: unit.out_queue.iter(),
+            popped: 0,
+            _unit: PhantomData,
+        }))
     }
 }
 
-impl<'u, 'm, 'a, 'g, M> CircuitLock<'_> for FetchLock<'u, 'm, 'a, 'g, M>
+impl<'u, 'm, 'a, 'g, 'd, M> CircuitLock<'u> for FetchLock<'u, 'm, 'a, 'g, 'd, M>
 where
     M: Mem<LdReq<MemErr>, Output = Result<ReqData, MemErr>>,
 {
-    type Trans = FetchTrans<'u, 'm, 'a, 'g, M>;
+    type Trans = FetchTrans<'u, 'm, 'a, 'g, 'd, M>;
 
     fn make_trans(&mut self) -> Self::Trans {
         Self::Trans {
-            finished: false,
+            item: self.0.as_mut().unwrap().iter.next(),
             _lock: PhantomData,
         }
     }
 }
 
-impl<M> Drop for FetchLock<'_, '_, '_, '_, M>
+impl<M> Drop for FetchLock<'_, '_, '_, '_, '_, M>
 where
     M: Mem<LdReq<MemErr>, Output = Result<ReqData, MemErr>>,
 {
     fn drop(&mut self) {
-        if !self.commited {
-            // Next pipeline stage stalls
-            self.addr_gen.fetch(self.addr_gen.next_pc());
+        let (unit, mem, addr_gen, mut predecode, popped) = unsafe {
+            // SAFETY: iter is dropped so it is safe to interact with the fetch unit again
+            let LockImpl {
+                unit,
+                mem,
+                addr_gen,
+                predecode,
+                popped,
+                ..
+            } = self.0.take().unwrap();
+            (&mut *unit, mem, addr_gen, predecode, popped)
+        };
+        drop(unit.out_queue.drain(..popped));
+
+        if !unit.out_queue.is_empty() {
+            addr_gen.fetch(addr_gen.next_pc());
+            predecode.forget();
             return;
         }
 
-        let req = self
-            .unit
+        let req = unit
             .req
             .take()
-            .and_then(|(h, pred)| {
-                let addr = self.mem.req_addr(&h);
-                match self.mem.take_if_ready(h) {
-                    Ok(out) => {
-                        debug_assert!(
-                            self.unit.last.is_none(),
-                            "output not cleared even though next pipeline stage does not stall"
-                        );
-                        self.unit.last = Some((addr, out, pred));
+            .and_then(|(h, btb_pred)| {
+                let addr = mem.req_addr(&h);
+                match mem.take_if_ready(h) {
+                    Ok(bytes) => {
+                        debug_assert!(unit.out_queue.is_empty());
+                        unit.out_queue = predecode.transform(FetchPacket {
+                            addr,
+                            bytes,
+                            btb_pred,
+                        });
+                        //TODO BP prediction
                         None
                     }
-                    Err(h) => Some((h, pred)),
+                    Err(h) => Some((h, btb_pred)),
                 }
             })
             .unwrap_or_else(|| {
-                let req = LdReq::new(self.addr_gen.next_pc(), self.unit.pkt_width);
-                let h = self.mem.req(req, self.unit.mem_conn);
-                //TODO BP and BTB predictions
+                let req = LdReq::new(addr_gen.next_pc(), unit.pkt_width);
+                let h = mem.req(req, unit.mem_conn);
+                //TODO BTB prediction
                 (h, None)
             });
 
-        let next_pc = self.mem.req_addr(&req.0) + self.unit.pkt_width as Addr;
-        self.addr_gen.fetch(next_pc);
-        self.unit.req = Some(req);
+        let next_pc = mem.req_addr(&req.0) + unit.pkt_width as Addr;
+        addr_gen.fetch(next_pc);
+        unit.req = Some(req);
         #[cfg(debug_assertions)]
         {
-            self.unit.fetched = true;
+            unit.fetched = true;
         }
     }
 }
 
-pub struct FetchTrans<'u, 'm, 'a, 'g, M>
+pub struct FetchTrans<'u, 'm, 'a, 'g, 'd, M>
 where
     M: Mem<LdReq<MemErr>, Output = Result<ReqData, MemErr>>,
 {
-    finished: bool,
-    _lock: PhantomData<FetchLock<'u, 'm, 'a, 'g, M>>,
+    item: Option<&'u Predecoded>,
+    _lock: PhantomData<FetchLock<'u, 'm, 'a, 'g, 'd, M>>,
 }
 
-impl<'u, 'm, 'a, 'g, M> Transformer<'_> for FetchTrans<'u, 'm, 'a, 'g, M>
+impl<'u, 'm, 'a, 'g, 'd, M> Transformer<'u> for FetchTrans<'u, 'm, 'a, 'g, 'd, M>
 where
     M: Mem<LdReq<MemErr>, Output = Result<ReqData, MemErr>>,
 {
     type In = ();
-    type Out = Result<FetchPacket, MemErr>;
-    type Lock = FetchLock<'u, 'm, 'a, 'g, M>;
+    type Out = &'u Predecoded;
+    type Lock = FetchLock<'u, 'm, 'a, 'g, 'd, M>;
 
-    fn transform(&mut self, lock: &Self::Lock, _: Self::In) -> Option<Self::Out> {
-        if self.finished {
-            return None;
-        }
-
-        self.finished = true;
-        lock.unit.last.clone().map(|(addr, res, btb_pred)| {
-            res.map(|bytes| FetchPacket {
-                addr,
-                bytes,
-                btb_pred,
-            })
-        })
+    fn transform(&mut self, _: &Self::Lock, _: Self::In) -> Option<Self::Out> {
+        self.item
     }
 
     fn commit(self, lock: &mut Self::Lock) {
-        lock.unit.last = None;
-        lock.commited = true;
+        lock.0.as_mut().unwrap().popped += 1;
     }
 }
