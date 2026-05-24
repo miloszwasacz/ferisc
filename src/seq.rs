@@ -20,6 +20,8 @@ pub trait Stallable: Sequential {
 }
 
 /// A trait for circuits that have a CLEAR port.
+///
+/// Usually implemented for circuits that need to support flushing.
 pub trait Clearable: Sequential {
     /// Restores the circuit to a default state at the end of the current
     /// clock cycle.
