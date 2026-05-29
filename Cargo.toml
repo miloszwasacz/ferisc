@@ -3,6 +3,7 @@ members = ["crates/macros"]
 
 [workspace.dependencies]
 ferisc-macros = { path = "crates/macros" }
+paste = "1.0.15"
 
 [package]
 name = "ferisc"
@@ -14,3 +15,5 @@ ferisc-macros = { workspace = true }
 strum = { version = "0.28.0", features = ["derive"] }
 generic-array = "1.4.1"
 bitflags = "2.11.1"
+paste = { workspace = true }
+static_assertions = "1.1.0"

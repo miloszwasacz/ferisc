@@ -7,6 +7,19 @@ macro_rules! unwrap {
     }};
 }
 
+macro_rules! create_macro {
+    ($name:ident) => {
+        ::paste::paste! {
+            mod [<$name:snake>];
+
+            #[proc_macro]
+            pub fn [<$name:snake>](input: ::proc_macro::TokenStream) -> ::proc_macro::TokenStream {
+                [<$name:snake>]::proc_macro(input)
+            }
+        }
+    };
+}
+
 macro_rules! create_derive {
     ($name:ident, attributes($( $attrs:tt )*)) => {
         ::paste::paste! {
@@ -23,4 +36,6 @@ macro_rules! create_derive {
     }
 }
 
+create_macro!(bitfields);
 create_derive!(ArchReg, attributes(hardwired));
+create_macro!(csr_file);

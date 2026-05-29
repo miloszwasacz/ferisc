@@ -5,6 +5,7 @@ use std::ops::DerefMut;
 
 pub mod fe;
 
+pub mod csr;
 mod flush;
 pub mod mem;
 pub mod reg;
