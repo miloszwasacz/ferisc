@@ -1,6 +1,6 @@
 //TODO Better docs
 
-use self::locks::{QueuePopLock, QueuePushLock};
+pub use self::locks::{PopTrans, PushTrans, QueuePopLock, QueuePushLock};
 use super::{Clearable, Sequential};
 use std::collections::vec_deque::{self, VecDeque};
 

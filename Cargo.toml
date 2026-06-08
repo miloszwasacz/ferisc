@@ -4,16 +4,30 @@ members = ["crates/macros"]
 [workspace.dependencies]
 ferisc-macros = { path = "crates/macros" }
 paste = "1.0.15"
+proc-macro2 = "1.0.106"
+syn = "2.0.117"
+quote = "1.0.45"
+convert_case = "0.11.0"
 
 [package]
 name = "ferisc"
 version = "0.1.0"
 edition = "2024"
+build = "build/main.rs"
 
 [dependencies]
 ferisc-macros = { workspace = true }
 strum = { version = "0.28.0", features = ["derive"] }
+derive_more = { version = "2.1.1", features = ["deref", "deref_mut"] }
 generic-array = "1.4.1"
 bitflags = "2.11.1"
 paste = { workspace = true }
 static_assertions = "1.1.0"
+
+[build-dependencies]
+proc-macro2 = { workspace = true }
+syn = { workspace = true }
+quote = { workspace = true }
+convert_case = { workspace = true }
+prettyplease = "0.2.37"
+walkdir = "2.5.0"

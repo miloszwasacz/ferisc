@@ -30,8 +30,15 @@ pub trait Transformer<'a> {
 
 /// A [`Transformer`] that sequentially combines two other transformers.
 pub struct TransCompose<T1, T2> {
-    pub(super) t1: T1,
-    pub(super) t2: T2,
+    t1: T1,
+    t2: T2,
+}
+
+impl<T1, T2> TransCompose<T1, T2> {
+    /// Composes two transformers together.
+    pub fn new(t1: T1, t2: T2) -> Self {
+        Self { t1, t2 }
+    }
 }
 
 impl<'a, T1, T2> Transformer<'a> for TransCompose<T1, T2>

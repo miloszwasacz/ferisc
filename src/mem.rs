@@ -26,8 +26,3 @@ pub trait Mem<R> {
     fn take_if_ready(&mut self, handle: Self::Handle) -> Result<Self::Output, Self::Handle>;
     fn kill(&mut self, handle: Self::Handle);
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum MemErr {
-    // PageFault, //TODO Page faults
-}

@@ -22,6 +22,13 @@ pub struct LockCompose<L1, L2> {
     pub(super) l2: L2,
 }
 
+impl<L1, L2> LockCompose<L1, L2> {
+    /// Composes two locks together.
+    pub fn new(l1: L1, l2: L2) -> Self {
+        Self { l1, l2 }
+    }
+}
+
 impl<'a, L1, L2> CircuitLock<'a> for LockCompose<L1, L2>
 where
     L1: CircuitLock<'a>,
@@ -32,9 +39,6 @@ where
     type Trans = TransCompose<L1::Trans, L2::Trans>;
 
     fn make_trans(&mut self) -> Self::Trans {
-        Self::Trans {
-            t1: self.l1.make_trans(),
-            t2: self.l2.make_trans(),
-        }
+        Self::Trans::new(self.l1.make_trans(), self.l2.make_trans())
     }
 }

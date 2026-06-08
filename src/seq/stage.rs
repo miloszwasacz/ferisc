@@ -1,8 +1,7 @@
 //TODO Better docs with examples
-pub use self::lock::CircuitLock;
-use self::lock::LockCompose;
+pub use self::lock::{CircuitLock, LockCompose};
 use self::map::TransLock;
-pub use self::trans::Transformer;
+pub use self::trans::{TransCompose, Transformer};
 
 mod lock;
 mod map;
@@ -35,10 +34,7 @@ impl<'a, T: CircuitLock<'a>> PipelineStage<T> {
     /// pipeline stage in the order of their definition. For more information on
     /// the execution guarantees, see the [`execute`](Self::execute) method.
     pub fn substage<U: CircuitLock<'a>>(self, lock: U) -> PipelineStage<LockCompose<T, U>> {
-        PipelineStage(LockCompose {
-            l1: self.0,
-            l2: lock,
-        })
+        PipelineStage(LockCompose::new(self.0, lock))
     }
 
     /// Adds a new infallible substage which applies a simple transformation
@@ -48,10 +44,7 @@ impl<'a, T: CircuitLock<'a>> PipelineStage<T> {
         T::Trans: Transformer<'a, Out = I>,
         F: Fn(I) -> O,
     {
-        PipelineStage(LockCompose {
-            l1: self.0,
-            l2: TransLock::new(f),
-        })
+        PipelineStage(LockCompose::new(self.0, TransLock::new(f)))
     }
 
     /// Executes the pipeline stage.

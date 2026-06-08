@@ -1,15 +1,21 @@
-use super::fetch::BtbPred;
-use crate::mem::{Addr, MemErr};
+use super::Exception;
+use crate::mem::Addr;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Predecoded {
-    pub addr: Addr,
-    pub bytes: Result<PdcdBytes, MemErr>,
-    pub btb_pred: BtbPred,
+    pub meta: Meta,
+    pub bytes: Result<PdcdBytes, Exception>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PdcdBytes {
-    Normal(u32),
-    Compressed(u16),
+    Normal(i32),
+    Compressed(i16),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Meta {
+    pub addr: Addr,
+    //TODO BP
+    pub pred: bool,
 }

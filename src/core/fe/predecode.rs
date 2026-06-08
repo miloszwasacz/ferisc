@@ -29,7 +29,7 @@ mod lock {
     use super::*;
     use crate::core::uop::{
         fetch::FetchPacket,
-        predecode::{PdcdBytes, Predecoded},
+        predecode::{Meta, PdcdBytes, Predecoded},
     };
     use crate::mem::Addr;
     use std::collections::VecDeque;
@@ -41,7 +41,8 @@ mod lock {
             let FetchPacket {
                 mut addr,
                 bytes,
-                btb_pred,
+                //TODO BTB pred
+                btb_pred: _,
             } = packet;
 
             let mut out = VecDeque::new();
@@ -49,9 +50,12 @@ mod lock {
                 Ok(bytes) => bytes,
                 Err(err) => {
                     return [Predecoded {
-                        addr,
+                        meta: Meta {
+                            addr,
+                            //TODO BP
+                            pred: false,
+                        },
                         bytes: Err(err),
-                        btb_pred,
                     }]
                     .into();
                 }
@@ -61,14 +65,14 @@ mod lock {
 
             if let Some(half) = self.1.take() {
                 debug_assert!(bytes.len() >= 2);
-                let hi = u16::from_le_bytes([bytes[0], bytes[1]]) as u32;
-                let lo = u16::from_le_bytes(half) as u32;
-
+                let raw = i32::from_le_bytes([half[0], half[1], bytes[0], bytes[1]]);
                 out.push_back(Predecoded {
-                    addr: addr - 2,
-                    bytes: Ok(PdcdBytes::Normal((hi << 16) | lo)),
-                    //TODO BTB prediction
-                    btb_pred: None,
+                    meta: Meta {
+                        addr: addr - 2,
+                        //TODO BP
+                        pred: false,
+                    },
+                    bytes: Ok(PdcdBytes::Normal(raw)),
                 });
                 addr += 2;
                 bytes = &bytes[2..];
@@ -82,19 +86,21 @@ mod lock {
                         break;
                     }
 
-                    let bytes = u32::from_le_bytes(bytes[..len].try_into().unwrap());
+                    let bytes = i32::from_le_bytes(bytes[..len].try_into().unwrap());
                     (PdcdBytes::Normal(bytes), len)
                 } else {
                     let len = 2;
-                    let bytes = u16::from_le_bytes(bytes[..len].try_into().unwrap());
+                    let bytes = i16::from_le_bytes(bytes[..len].try_into().unwrap());
                     (PdcdBytes::Compressed(bytes), len)
                 };
 
                 out.push_back(Predecoded {
-                    addr,
+                    meta: Meta {
+                        addr,
+                        //TODO BP
+                        pred: false,
+                    },
                     bytes: Ok(pdcd),
-                    //TODO BTB prediction
-                    btb_pred: None,
                 });
                 addr += len as Addr;
                 bytes = &bytes[len..];

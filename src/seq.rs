@@ -1,9 +1,9 @@
 pub use self::buf::Buf;
 pub use self::queue::Queue;
-pub use self::stage::{CircuitLock, PipelineStage, Transformer};
+pub use self::stage::PipelineStage;
 
 mod buf;
-mod queue;
+pub mod queue;
 mod stage;
 
 /// A trait for a clock-based circuit.
@@ -31,4 +31,17 @@ pub trait Clearable: Sequential {
     ///
     /// Clearing takes precedence over [stalling](Stallable::stall).
     fn clear(&mut self);
+}
+
+pub mod locks {
+    pub use super::stage::{CircuitLock, LockCompose, TransCompose, Transformer};
+
+    pub trait StageLock<'a, I, O>:
+        CircuitLock<'a, Trans: Transformer<'a, In = I, Out = O, Lock = Self>>
+    {
+    }
+    impl<'a, I, O, L> StageLock<'a, I, O> for L where
+        L: CircuitLock<'a, Trans: Transformer<'a, In = I, Out = O, Lock = Self>>
+    {
+    }
 }

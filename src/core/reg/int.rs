@@ -1,6 +1,7 @@
 use super::{ArchReg, ArchRegCount, RegRepr};
 use crate::mem::Addr;
 use ferisc_macros::ArchReg;
+use std::ops::{BitAnd, BitOr, Not, Shl, Shr};
 use strum::{Display, FromRepr};
 
 //#region Arch
@@ -12,7 +13,7 @@ use strum::{Display, FromRepr};
 pub enum IntReg {
     /// Always zero
     #[hardwired]
-    ZERO,
+    ZERO = 0,
 
     /// Return address
     RA,
@@ -95,6 +96,10 @@ impl IntReg {
 
 impl RegRepr for IntReg {
     type Repr = IntVal;
+
+    fn decode(enc: i32) -> Option<Self> {
+        Self::from_repr(enc as _)
+    }
 }
 
 //#endregion
@@ -144,6 +149,46 @@ impl IntVal {
     /// Returns the register value as a memory address.
     pub fn addr(&self) -> Addr {
         self.0 as _
+    }
+}
+
+impl BitAnd for IntVal {
+    type Output = Self;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        Self::unsigned(self.u() & rhs.u())
+    }
+}
+
+impl BitOr for IntVal {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self::unsigned(self.u() | rhs.u())
+    }
+}
+
+impl Not for IntVal {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        Self::unsigned(!self.u())
+    }
+}
+
+impl Shl<u8> for IntVal {
+    type Output = Self;
+
+    fn shl(self, rhs: u8) -> Self::Output {
+        Self::unsigned(self.u() << rhs)
+    }
+}
+
+impl Shr<u8> for IntVal {
+    type Output = Self;
+
+    fn shr(self, rhs: u8) -> Self::Output {
+        Self::unsigned(self.u() >> rhs)
     }
 }
 

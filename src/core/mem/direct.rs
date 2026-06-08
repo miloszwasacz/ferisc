@@ -1,5 +1,6 @@
 use super::MemHierarchy;
-use crate::mem::{Dram, MemErr};
+use crate::core::uop::Exception;
+use crate::mem::Dram;
 use std::sync::{Arc, RwLock, RwLockWriteGuard};
 
 #[derive(Debug)]
@@ -14,7 +15,7 @@ impl DirectHierarchy {
 }
 
 impl MemHierarchy for DirectHierarchy {
-    type Err = MemErr;
+    type Err = Exception;
     type IMem<'a> = RwLockWriteGuard<'a, Dram>;
     type DMem<'a> = RwLockWriteGuard<'a, Dram>;
 

@@ -1,7 +1,8 @@
 use super::{
-    Addr, Mem, MemErr,
+    Addr, Mem,
     req::{LdReq, MemConn, ReqBuf, ReqData, ReqHandle, ReqState, StReq},
 };
+use crate::core::uop::Exception;
 use crate::seq::Sequential;
 use std::pin::Pin;
 
@@ -23,8 +24,8 @@ const HANDLE_VALID_MSG: &str = "a caller should not have a handle if no request 
 #[derive(Debug, Clone)]
 pub struct Dram {
     mem: Pin<Box<[u8]>>,
-    ld_reqs: (Vec<ReqBuf<LdReq<MemErr>>>, usize),
-    st_reqs: (Vec<ReqBuf<StReq<MemErr>>>, usize),
+    ld_reqs: (Vec<ReqBuf<LdReq<Exception>>>, usize),
+    st_reqs: (Vec<ReqBuf<StReq<Exception>>>, usize),
 }
 
 impl Dram {
@@ -42,10 +43,10 @@ impl Dram {
     }
 }
 
-impl Mem<LdReq<MemErr>> for Dram {
+impl Mem<LdReq<Exception>> for Dram {
     type Conn = MemConn;
     type Handle = ReqHandle;
-    type Output = Result<ReqData, MemErr>;
+    type Output = Result<ReqData, Exception>;
 
     fn register_conn(&mut self) -> Self::Conn {
         let conn = MemConn(self.ld_reqs.0.len());
@@ -53,7 +54,7 @@ impl Mem<LdReq<MemErr>> for Dram {
         conn
     }
 
-    fn req(&mut self, req: LdReq<MemErr>, conn: Self::Conn) -> Self::Handle {
+    fn req(&mut self, req: LdReq<Exception>, conn: Self::Conn) -> Self::Handle {
         self.ld_reqs.0[conn.0].write(req);
         ReqHandle {
             #[cfg(debug_assertions)]
@@ -92,10 +93,10 @@ impl Mem<LdReq<MemErr>> for Dram {
     }
 }
 
-impl Mem<StReq<MemErr>> for Dram {
+impl Mem<StReq<Exception>> for Dram {
     type Conn = MemConn;
     type Handle = ReqHandle;
-    type Output = Result<(), MemErr>;
+    type Output = Result<(), Exception>;
 
     fn register_conn(&mut self) -> Self::Conn {
         let conn = MemConn(self.st_reqs.0.len());
@@ -103,7 +104,7 @@ impl Mem<StReq<MemErr>> for Dram {
         conn
     }
 
-    fn req(&mut self, req: StReq<MemErr>, conn: Self::Conn) -> Self::Handle {
+    fn req(&mut self, req: StReq<Exception>, conn: Self::Conn) -> Self::Handle {
         self.st_reqs.0[conn.0].write(req);
         ReqHandle {
             #[cfg(debug_assertions)]

@@ -1,9 +1,10 @@
 use generic_array::ArrayLength;
+use std::hash::Hash;
 
 pub mod int;
 
 /// Architectural registers as defined by the ISA.
-pub trait ArchReg: RegRepr + ArchRegCount + Into<usize> + Copy {
+pub trait ArchReg: RegRepr + ArchRegCount + Copy + Eq + Hash + Into<usize> {
     /// Returns an iterator of all available architectural registers.
     fn iter() -> impl Iterator<Item = Self>;
 
@@ -11,11 +12,14 @@ pub trait ArchReg: RegRepr + ArchRegCount + Into<usize> + Copy {
     fn is_hardwired(&self) -> bool;
 }
 
-/// Physical representation of the data stored by registers.
-pub trait RegRepr {
+/// Representations associated with architectural registers
+pub trait RegRepr: Sized {
     /// The data type stored by physical registers associated with
     /// architectural registers of a given kind.
     type Repr: Default;
+
+    /// Decodes a binary representation into an architectural register, if possible.
+    fn decode(enc: i32) -> Option<Self>;
 }
 
 pub trait ArchRegCount {

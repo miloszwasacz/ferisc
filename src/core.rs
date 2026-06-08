@@ -1,6 +1,9 @@
-use self::fe::{AddrGen, fetch::FetchUnit, predecode::Predecoder};
+use self::fe::{AddrGen, decode::DecodeUnit, fetch::FetchUnit, predecode::Predecoder};
 use self::mem::{DirectHierarchy, MemHierarchy};
-use crate::seq::Clearable;
+use crate::{
+    core::{csr::CsrFile, uop::Mode},
+    seq::{Buf, Clearable, PipelineStage},
+};
 use std::ops::DerefMut;
 
 pub mod fe;
@@ -15,8 +18,11 @@ pub struct Core {
     addr_gen: AddrGen,
     fetch: FetchUnit,
     predecode: Predecoder,
+    decode: DecodeUnit,
 
     mem: DirectHierarchy,
+    csrf: CsrFile,
+    mode: Buf<Mode>,
 }
 
 impl Core {
@@ -24,11 +30,27 @@ impl Core {
         let mut addr_gen = self.addr_gen.lock();
 
         //TODO Process tick
-        self.fetch.fetch(
-            self.mem.imem().deref_mut(),
-            &mut addr_gen,
-            self.predecode.lock(),
-        );
+        {
+            let mut imem = self.mem.imem();
+
+            // Fetch
+            let fetch = self
+                .fetch
+                .fetch(imem.deref_mut(), &mut addr_gen, self.predecode.lock());
+
+            // Decode
+            PipelineStage::new(fetch)
+                .substage(self.decode.decode(&self.csrf, self.mode.read_copied()))
+                .execute();
+        }
+
+        // // Rename/Dispatch
+        // let (rename, dispatch) = self.pipelines.locks();
+        // PipelineStage::new(self.decode.lock())
+        //     .substage(rename)
+        //     .substage(self.rob.dispatch())
+        //     .substage(dispatch)
+        //     .execute();
 
         //TODO How to update BTB and BP when flushing?
         addr_gen.apply().flush_stages(

@@ -1,7 +1,7 @@
 pub use self::lock::FetchLock;
 use super::{AddrGenLock, predecode::PredecodeLock};
-use crate::core::uop::{fetch::BtbPred, predecode::Predecoded};
-use crate::mem::{LdReq, Mem, MemConn, MemErr, ReqData, ReqHandle};
+use crate::core::uop::{Exception, fetch::BtbPred, predecode::Predecoded};
+use crate::mem::{LdReq, Mem, MemConn, ReqData, ReqHandle};
 use crate::seq::Sequential;
 use std::collections::VecDeque;
 
@@ -21,7 +21,7 @@ pub struct FetchUnit<C = MemConn, H = ReqHandle> {
 impl<C, H> FetchUnit<C, H> {
     pub fn new<M>(mem: &mut M, pkt_width: usize) -> Self
     where
-        M: Mem<LdReq<MemErr>, Conn = C, Handle = H, Output = Result<ReqData, MemErr>>,
+        M: Mem<LdReq<Exception>, Conn = C, Handle = H, Output = Result<ReqData, Exception>>,
     {
         Self {
             mem_conn: mem.register_conn(),
@@ -41,7 +41,7 @@ impl<C, H> FetchUnit<C, H> {
         predecode: PredecodeLock<'d>,
     ) -> FetchLock<'f, 'm, 'a, 'g, 'd, M>
     where
-        M: Mem<LdReq<MemErr>, Conn = C, Handle = H, Output = Result<ReqData, MemErr>>,
+        M: Mem<LdReq<Exception>, Conn = C, Handle = H, Output = Result<ReqData, Exception>>,
     {
         #[cfg(debug_assertions)]
         assert!(!self.fetched, "cannot fetch more than once per clock cycle");
@@ -51,7 +51,7 @@ impl<C, H> FetchUnit<C, H> {
 
     pub fn clear<M>(&mut self, mem: &mut M)
     where
-        M: Mem<LdReq<MemErr>, Conn = C, Handle = H, Output = Result<ReqData, MemErr>>,
+        M: Mem<LdReq<Exception>, Conn = C, Handle = H, Output = Result<ReqData, Exception>>,
     {
         self.flushed = true;
         if let Some((h, _)) = self.req.take() {

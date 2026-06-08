@@ -1,20 +1,20 @@
 use super::FetchUnit;
 use crate::core::{
     fe::{AddrGenLock, predecode::PredecodeLock},
-    uop::{fetch::FetchPacket, predecode::Predecoded},
+    uop::{Exception, fetch::FetchPacket, predecode::Predecoded},
 };
-use crate::mem::{Addr, LdReq, Mem, MemErr, ReqData};
-use crate::seq::{CircuitLock, Transformer};
+use crate::mem::{Addr, LdReq, Mem, ReqData};
+use crate::seq::locks::{CircuitLock, Transformer};
 use std::collections::vec_deque::Iter;
 use std::marker::PhantomData;
 
 pub struct FetchLock<'u, 'm, 'a, 'g, 'd, M>(Option<LockImpl<'u, 'm, 'a, 'g, 'd, M>>)
 where
-    M: Mem<LdReq<MemErr>, Output = Result<ReqData, MemErr>>;
+    M: Mem<LdReq<Exception>, Output = Result<ReqData, Exception>>;
 
 struct LockImpl<'u, 'm, 'a, 'g, 'd, M>
 where
-    M: Mem<LdReq<MemErr>, Output = Result<ReqData, MemErr>>,
+    M: Mem<LdReq<Exception>, Output = Result<ReqData, Exception>>,
 {
     unit: *mut FetchUnit<M::Conn, M::Handle>,
     mem: &'m mut M,
@@ -27,7 +27,7 @@ where
 
 impl<'u, 'm, 'a, 'g, 'd, M> FetchLock<'u, 'm, 'a, 'g, 'd, M>
 where
-    M: Mem<LdReq<MemErr>, Output = Result<ReqData, MemErr>>,
+    M: Mem<LdReq<Exception>, Output = Result<ReqData, Exception>>,
 {
     pub(super) fn new(
         unit: &'u mut FetchUnit<M::Conn, M::Handle>,
@@ -49,7 +49,7 @@ where
 
 impl<'u, 'm, 'a, 'g, 'd, M> CircuitLock<'u> for FetchLock<'u, 'm, 'a, 'g, 'd, M>
 where
-    M: Mem<LdReq<MemErr>, Output = Result<ReqData, MemErr>>,
+    M: Mem<LdReq<Exception>, Output = Result<ReqData, Exception>>,
 {
     type Trans = FetchTrans<'u, 'm, 'a, 'g, 'd, M>;
 
@@ -63,7 +63,7 @@ where
 
 impl<M> Drop for FetchLock<'_, '_, '_, '_, '_, M>
 where
-    M: Mem<LdReq<MemErr>, Output = Result<ReqData, MemErr>>,
+    M: Mem<LdReq<Exception>, Output = Result<ReqData, Exception>>,
 {
     fn drop(&mut self) {
         let (unit, mem, addr_gen, mut predecode, popped) = unsafe {
@@ -124,7 +124,7 @@ where
 
 pub struct FetchTrans<'u, 'm, 'a, 'g, 'd, M>
 where
-    M: Mem<LdReq<MemErr>, Output = Result<ReqData, MemErr>>,
+    M: Mem<LdReq<Exception>, Output = Result<ReqData, Exception>>,
 {
     item: Option<&'u Predecoded>,
     _lock: PhantomData<FetchLock<'u, 'm, 'a, 'g, 'd, M>>,
@@ -132,7 +132,7 @@ where
 
 impl<'u, 'm, 'a, 'g, 'd, M> Transformer<'u> for FetchTrans<'u, 'm, 'a, 'g, 'd, M>
 where
-    M: Mem<LdReq<MemErr>, Output = Result<ReqData, MemErr>>,
+    M: Mem<LdReq<Exception>, Output = Result<ReqData, Exception>>,
 {
     type In = ();
     type Out = &'u Predecoded;

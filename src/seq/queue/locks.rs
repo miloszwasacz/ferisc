@@ -1,5 +1,5 @@
 use super::Queue;
-use crate::seq::{CircuitLock, Transformer};
+use crate::seq::locks::{CircuitLock, Transformer};
 use std::collections::VecDeque;
 use std::marker::PhantomData;
 
