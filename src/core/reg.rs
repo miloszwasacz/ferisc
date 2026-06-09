@@ -2,6 +2,7 @@ use generic_array::ArrayLength;
 use std::hash::Hash;
 
 pub mod int;
+pub mod phys;
 
 /// Architectural registers as defined by the ISA.
 pub trait ArchReg: RegRepr + ArchRegCount + Copy + Eq + Hash + Into<usize> {

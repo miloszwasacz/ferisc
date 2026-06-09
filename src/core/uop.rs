@@ -7,6 +7,7 @@ pub mod int;
 pub mod decode;
 pub mod fetch;
 pub mod predecode;
+pub mod rename;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UopKind<I> {
@@ -18,6 +19,9 @@ pub enum UopKind<I> {
 pub trait InferUop<T: ArchReg> {
     type Kind;
 }
+
+#[allow(type_alias_bounds)]
+pub type Infer<U: InferUop<T>, T> = <U as InferUop<T>>::Kind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Exception {

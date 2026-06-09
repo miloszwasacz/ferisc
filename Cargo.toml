@@ -18,7 +18,7 @@ build = "build/main.rs"
 [dependencies]
 ferisc-macros = { workspace = true }
 strum = { version = "0.28.0", features = ["derive"] }
-derive_more = { version = "2.1.1", features = ["deref", "deref_mut"] }
+derive_more = { version = "2.1.1", features = ["debug", "deref", "deref_mut"] }
 generic-array = "1.4.1"
 bitflags = "2.11.1"
 paste = { workspace = true }

@@ -12,6 +12,12 @@ impl<F, I, O> TransLock<F, I, O> {
     }
 }
 
+impl<T: Copy> CopiedLock<'_, T> {
+    pub(super) fn copied() -> Self {
+        Self(T::clone, PhantomData)
+    }
+}
+
 impl<F, I, O> CircuitLock<'_> for TransLock<F, I, O>
 where
     F: Fn(I) -> O,
@@ -39,3 +45,5 @@ where
 
     fn commit(self, _: &mut Self::Lock) {}
 }
+
+pub type CopiedLock<'a, T> = TransLock<fn(&'a T) -> T, &'a T, T>;

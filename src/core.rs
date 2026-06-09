@@ -1,5 +1,6 @@
 use self::fe::{AddrGen, decode::DecodeUnit, fetch::FetchUnit, predecode::Predecoder};
 use self::mem::{DirectHierarchy, MemHierarchy};
+use self::pipeline::Pipelines;
 use crate::{
     core::{csr::CsrFile, uop::Mode},
     seq::{Buf, Clearable, PipelineStage},
@@ -11,6 +12,7 @@ pub mod fe;
 pub mod csr;
 mod flush;
 pub mod mem;
+pub mod pipeline;
 pub mod reg;
 pub mod uop;
 
@@ -19,6 +21,7 @@ pub struct Core {
     fetch: FetchUnit,
     predecode: Predecoder,
     decode: DecodeUnit,
+    pipelines: Pipelines,
 
     mem: DirectHierarchy,
     csrf: CsrFile,

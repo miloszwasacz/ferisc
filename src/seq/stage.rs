@@ -1,6 +1,6 @@
 //TODO Better docs with examples
 pub use self::lock::{CircuitLock, LockCompose};
-use self::map::TransLock;
+use self::map::{CopiedLock, TransLock};
 pub use self::trans::{TransCompose, Transformer};
 
 mod lock;
@@ -45,6 +45,14 @@ impl<'a, T: CircuitLock<'a>> PipelineStage<T> {
         F: Fn(I) -> O,
     {
         PipelineStage(LockCompose::new(self.0, TransLock::new(f)))
+    }
+
+    pub fn copied<U>(self) -> PipelineStage<LockCompose<T, CopiedLock<'a, U>>>
+    where
+        T::Trans: Transformer<'a, Out = &'a U>,
+        U: Copy,
+    {
+        PipelineStage(LockCompose::new(self.0, CopiedLock::copied()))
     }
 
     /// Executes the pipeline stage.

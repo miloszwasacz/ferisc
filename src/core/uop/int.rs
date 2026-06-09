@@ -61,10 +61,10 @@ pub enum Src<R> {
 }
 
 impl<R> Src<R> {
-    pub fn map_reg<U>(&self, f: impl Fn(&R) -> U) -> Src<U> {
+    pub fn map_reg<U>(self, f: impl Fn(R) -> U) -> Src<U> {
         match self {
             Self::Reg(r) => Src::Reg(f(r)),
-            Self::Imm(imm) => Src::Imm(*imm),
+            Self::Imm(imm) => Src::Imm(imm),
         }
     }
 }
