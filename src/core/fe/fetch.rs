@@ -1,8 +1,8 @@
-pub use self::lock::FetchLock;
+use self::lock::FetchLock;
 use super::{AddrGenLock, predecode::PredecodeLock};
 use crate::core::uop::{Exception, fetch::BtbPred, predecode::Predecoded};
 use crate::mem::{LdReq, Mem, MemConn, ReqData, ReqHandle};
-use crate::seq::Sequential;
+use crate::seq::{Sequential, locks::StageLock};
 use std::collections::VecDeque;
 
 mod lock;
@@ -34,12 +34,12 @@ impl<C, H> FetchUnit<C, H> {
         }
     }
 
-    pub fn fetch<'f, 'm, 'a, 'g, 'd, M>(
+    pub fn fetch<'f, M>(
         &'f mut self,
-        mem: &'m mut M,
-        addr_gen: &'a mut AddrGenLock<'g>,
-        predecode: PredecodeLock<'d>,
-    ) -> FetchLock<'f, 'm, 'a, 'g, 'd, M>
+        mem: &mut M,
+        addr_gen: AddrGenLock<'_>,
+        predecode: PredecodeLock<'_>,
+    ) -> impl StageLock<'f, (), &'f Predecoded>
     where
         M: Mem<LdReq<Exception>, Conn = C, Handle = H, Output = Result<ReqData, Exception>>,
     {

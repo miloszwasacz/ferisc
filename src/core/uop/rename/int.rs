@@ -56,11 +56,13 @@ impl Rename for decode::int::Uop {
                 offset,
                 link,
                 link_addr,
+                pred,
             } => Self::Renamed::Jalr {
                 base: get_oper(base),
                 offset,
                 link: alloc_dest(link, Some(IntVal::address(link_addr)))?,
                 link_addr,
+                pred,
             },
             Self::Br {
                 cmp,
@@ -68,12 +70,14 @@ impl Rename for decode::int::Uop {
                 src2,
                 target,
                 pred,
+                btb_pred,
             } => Self::Renamed::Br {
                 cmp,
                 src1: get_oper(src1),
                 src2: get_oper(src2),
                 target,
                 pred,
+                btb_pred,
             },
             Self::Ld {
                 size,

@@ -17,13 +17,15 @@ macro_rules! branch {
     ($( $vis:vis $name:ident($cmp:ident) )*) => {
         int_inst! {
             $(
-            $vis $name(fmt: B, Meta { addr: pc, .. }, _): Br {
+            $vis $name(fmt: B, Meta { addr: pc, pred: btb_pred }, _): Br {
                 cmp: BrCmp::$cmp,
                 src1: fmt.rs1,
                 src2: fmt.rs2,
                 target: pc.wrapping_add_signed(fmt.imm.s()),
-                //TODO BP
+                // The prediction needs to be updated later, once the decoding is done,
+                // since some BPs need the target address.
                 pred: false,
+                btb_pred,
             }
             )*
         }

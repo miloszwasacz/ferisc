@@ -8,5 +8,5 @@ pub type BtbPred = Option<Addr>;
 pub struct FetchPacket {
     pub addr: Addr,
     pub bytes: Result<Arc<[u8]>, Exception>,
-    pub btb_pred: BtbPred,
+    pub pred: BtbPred,
 }

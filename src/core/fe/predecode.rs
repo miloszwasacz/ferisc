@@ -9,7 +9,7 @@ pub struct Predecoder(Buf<CrossBlock>);
 impl Predecoder {
     pub fn lock(&mut self) -> PredecodeLock<'_> {
         let cross = self.0.read_copied();
-        PredecodeLock(self, cross)
+        PredecodeLock::new(self, cross)
     }
 }
 
@@ -34,15 +34,26 @@ mod lock {
     use crate::mem::Addr;
     use std::collections::VecDeque;
 
-    pub struct PredecodeLock<'a>(pub(super) &'a mut Predecoder, pub(super) CrossBlock);
+    pub struct PredecodeLock<'a> {
+        predecoder: &'a mut Predecoder,
+        cross_block: CrossBlock,
+        forget: bool,
+    }
 
-    impl PredecodeLock<'_> {
+    impl<'a> PredecodeLock<'a> {
+        pub(super) fn new(predecoder: &'a mut Predecoder, cross_block: CrossBlock) -> Self {
+            Self {
+                predecoder,
+                cross_block,
+                forget: false,
+            }
+        }
+
         pub fn transform(&mut self, packet: FetchPacket) -> VecDeque<Predecoded> {
             let FetchPacket {
                 mut addr,
                 bytes,
-                //TODO BTB pred
-                btb_pred: _,
+                pred,
             } = packet;
 
             let mut out = VecDeque::new();
@@ -50,11 +61,7 @@ mod lock {
                 Ok(bytes) => bytes,
                 Err(err) => {
                     return [Predecoded {
-                        meta: Meta {
-                            addr,
-                            //TODO BP
-                            pred: false,
-                        },
+                        meta: Meta { addr, pred },
                         bytes: Err(err),
                     }]
                     .into();
@@ -63,14 +70,13 @@ mod lock {
             let mut bytes = bytes_owned.as_ref();
             debug_assert!(bytes.len().is_multiple_of(2));
 
-            if let Some(half) = self.1.take() {
+            if let Some(half) = self.cross_block.take() {
                 debug_assert!(bytes.len() >= 2);
                 let raw = i32::from_le_bytes([half[0], half[1], bytes[0], bytes[1]]);
                 out.push_back(Predecoded {
                     meta: Meta {
                         addr: addr - 2,
-                        //TODO BP
-                        pred: false,
+                        pred,
                     },
                     bytes: Ok(PdcdBytes::Normal(raw)),
                 });
@@ -82,7 +88,7 @@ mod lock {
                 let (pdcd, len) = if bytes[0] & 0b11 == 0b11 {
                     let len = 4;
                     if bytes.len() < len {
-                        self.1 = Some([bytes[0], bytes[1]]);
+                        self.cross_block = Some([bytes[0], bytes[1]]);
                         break;
                     }
 
@@ -95,11 +101,7 @@ mod lock {
                 };
 
                 out.push_back(Predecoded {
-                    meta: Meta {
-                        addr,
-                        //TODO BP
-                        pred: false,
-                    },
+                    meta: Meta { addr, pred },
                     bytes: Ok(pdcd),
                 });
                 addr += len as Addr;
@@ -108,14 +110,16 @@ mod lock {
             out
         }
 
-        pub fn forget(self) {
-            let Self(_, _) = self;
+        pub fn forget(mut self) {
+            self.forget = true;
         }
     }
 
     impl Drop for PredecodeLock<'_> {
         fn drop(&mut self) {
-            self.0.0.write(self.1);
+            if !self.forget {
+                self.predecoder.0.write(self.cross_block);
+            }
         }
     }
 }

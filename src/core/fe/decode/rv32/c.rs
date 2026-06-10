@@ -356,7 +356,14 @@ pub(in super::super) fn c_j(fmt: CJ, meta: Meta, _: Mode) -> UopKind {
     })
 }
 
-pub(in super::super) fn c_beqz(fmt: CB, meta: Meta, _: Mode) -> UopKind {
+pub(in super::super) fn c_beqz(
+    fmt: CB,
+    Meta {
+        addr: pc,
+        pred: btb_pred,
+    }: Meta,
+    _: Mode,
+) -> UopKind {
     let mut imm_enc = fmt.offset2 as i16;
     let imm5 = imm_part!(1, imm_enc) << 5;
     let imm1 = imm_part!(2, imm_enc) << 1;
@@ -365,18 +372,28 @@ pub(in super::super) fn c_beqz(fmt: CB, meta: Meta, _: Mode) -> UopKind {
     let imm3 = imm_part!(2, imm_enc) << 3;
     let imm8 = imm_part!(1, imm_enc, sign extend) << 8;
     let offset = imm8 | imm6 | imm5 | imm3 | imm1;
-    let target = meta.addr.wrapping_add_signed(offset as _);
+    let target = pc.wrapping_add_signed(offset as _);
 
     UopKind::Int(int::Uop::Br {
         cmp: BrCmp::Eq,
         src1: fmt.rd_rs1,
         src2: IntReg::ZERO,
         target,
-        pred: meta.pred,
+        // The prediction needs to be updated later, once the decoding is done,
+        // since some BPs need the target address.
+        pred: false,
+        btb_pred,
     })
 }
 
-pub(in super::super) fn c_bnez(fmt: CB, meta: Meta, _: Mode) -> UopKind {
+pub(in super::super) fn c_bnez(
+    fmt: CB,
+    Meta {
+        addr: pc,
+        pred: btb_pred,
+    }: Meta,
+    _: Mode,
+) -> UopKind {
     let mut imm_enc = fmt.offset2 as i16;
     let imm5 = imm_part!(1, imm_enc) << 5;
     let imm1 = imm_part!(2, imm_enc) << 1;
@@ -385,14 +402,17 @@ pub(in super::super) fn c_bnez(fmt: CB, meta: Meta, _: Mode) -> UopKind {
     let imm3 = imm_part!(2, imm_enc) << 3;
     let imm8 = imm_part!(1, imm_enc, sign extend) << 8;
     let offset = imm8 | imm6 | imm5 | imm3 | imm1;
-    let target = meta.addr.wrapping_add_signed(offset as _);
+    let target = pc.wrapping_add_signed(offset as _);
 
     UopKind::Int(int::Uop::Br {
         cmp: BrCmp::Ne,
         src1: fmt.rd_rs1,
         src2: IntReg::ZERO,
         target,
-        pred: meta.pred,
+        // The prediction needs to be updated later, once the decoding is done,
+        // since some BPs need the target address.
+        pred: false,
+        btb_pred,
     })
 }
 
@@ -462,7 +482,7 @@ fn c_flwsp(fmt: CI<FpReg>, _: Meta, _: Mode) -> UopKind {
     // })
 }
 
-pub(in super::super) fn c_jr(fmt: CR, meta: Meta, _: Mode) -> UopKind {
+pub(in super::super) fn c_jr(fmt: CR, Meta { addr: pc, pred }: Meta, _: Mode) -> UopKind {
     debug_assert_eq!(fmt.rs2, IntReg::ZERO);
     if fmt.rd_rs1 == IntReg::ZERO {
         return RESERVED;
@@ -472,7 +492,8 @@ pub(in super::super) fn c_jr(fmt: CR, meta: Meta, _: Mode) -> UopKind {
         base: fmt.rd_rs1,
         offset: IntVal::signed(0),
         link: IntReg::ZERO,
-        link_addr: meta.addr.wrapping_add(2),
+        link_addr: pc.wrapping_add(2),
+        pred,
     })
 }
 
@@ -497,7 +518,7 @@ pub(in super::super) fn c_ebreak(fmt: CR, _: Meta, _: Mode) -> UopKind {
     UopKind::Except(Exception::Breakpoint)
 }
 
-pub(in super::super) fn c_jalr(fmt: CR, meta: Meta, _: Mode) -> UopKind {
+pub(in super::super) fn c_jalr(fmt: CR, Meta { addr: pc, pred }: Meta, _: Mode) -> UopKind {
     debug_assert_eq!(fmt.rs2, IntReg::ZERO);
     debug_assert_ne!(fmt.rd_rs1, IntReg::ZERO, "should be c.ebreak");
 
@@ -505,7 +526,8 @@ pub(in super::super) fn c_jalr(fmt: CR, meta: Meta, _: Mode) -> UopKind {
         base: fmt.rd_rs1,
         offset: IntVal::signed(0),
         link: IntReg::RA,
-        link_addr: meta.addr.wrapping_add(2),
+        link_addr: pc.wrapping_add(2),
+        pred,
     })
 }
 

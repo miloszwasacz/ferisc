@@ -8,33 +8,33 @@ use crate::seq::locks::{CircuitLock, Transformer};
 use std::collections::vec_deque::Iter;
 use std::marker::PhantomData;
 
-pub struct FetchLock<'u, 'm, 'a, 'g, 'd, M>(Option<LockImpl<'u, 'm, 'a, 'g, 'd, M>>)
+pub struct FetchLock<'u, 'm, 'g, 'd, M>(Option<LockImpl<'u, 'm, 'g, 'd, M>>)
 where
     M: Mem<LdReq<Exception>, Output = Result<ReqData, Exception>>;
 
-struct LockImpl<'u, 'm, 'a, 'g, 'd, M>
+struct LockImpl<'u, 'm, 'g, 'd, M>
 where
     M: Mem<LdReq<Exception>, Output = Result<ReqData, Exception>>,
 {
     unit: *mut FetchUnit<M::Conn, M::Handle>,
     mem: &'m mut M,
-    addr_gen: &'a mut AddrGenLock<'g>,
+    addr_gen: AddrGenLock<'g>,
     predecode: PredecodeLock<'d>,
     iter: Iter<'u, Predecoded>,
     popped: usize,
     _unit: PhantomData<&'u mut FetchUnit<M::Conn, M::Handle>>,
 }
 
-impl<'u, 'm, 'a, 'g, 'd, M> FetchLock<'u, 'm, 'a, 'g, 'd, M>
+impl<'u, 'm, 'g, 'd, M> FetchLock<'u, 'm, 'g, 'd, M>
 where
     M: Mem<LdReq<Exception>, Output = Result<ReqData, Exception>>,
 {
     pub(super) fn new(
         unit: &'u mut FetchUnit<M::Conn, M::Handle>,
         mem: &'m mut M,
-        addr_gen: &'a mut AddrGenLock<'g>,
+        addr_gen: AddrGenLock<'g>,
         predecode: PredecodeLock<'d>,
-    ) -> FetchLock<'u, 'm, 'a, 'g, 'd, M> {
+    ) -> FetchLock<'u, 'm, 'g, 'd, M> {
         Self(Some(LockImpl {
             unit: unit as _,
             mem,
@@ -47,11 +47,11 @@ where
     }
 }
 
-impl<'u, 'm, 'a, 'g, 'd, M> CircuitLock<'u> for FetchLock<'u, 'm, 'a, 'g, 'd, M>
+impl<'u, 'm, 'g, 'd, M> CircuitLock<'u> for FetchLock<'u, 'm, 'g, 'd, M>
 where
     M: Mem<LdReq<Exception>, Output = Result<ReqData, Exception>>,
 {
-    type Trans = FetchTrans<'u, 'm, 'a, 'g, 'd, M>;
+    type Trans = FetchTrans<'u, 'm, 'g, 'd, M>;
 
     fn make_trans(&mut self) -> Self::Trans {
         Self::Trans {
@@ -61,12 +61,12 @@ where
     }
 }
 
-impl<M> Drop for FetchLock<'_, '_, '_, '_, '_, M>
+impl<M> Drop for FetchLock<'_, '_, '_, '_, M>
 where
     M: Mem<LdReq<Exception>, Output = Result<ReqData, Exception>>,
 {
     fn drop(&mut self) {
-        let (unit, mem, addr_gen, mut predecode, popped) = unsafe {
+        let (unit, mem, mut addr_gen, mut predecode, popped) = unsafe {
             // SAFETY: iter is dropped so it is safe to interact with the fetch unit again
             let LockImpl {
                 unit,
@@ -89,20 +89,15 @@ where
         let req = unit
             .req
             .take()
-            .and_then(|(h, btb_pred)| {
+            .and_then(|(h, pred)| {
                 let addr = mem.req_addr(&h);
                 match mem.take_if_ready(h) {
                     Ok(bytes) => {
                         debug_assert!(unit.out_queue.is_empty());
-                        unit.out_queue = predecode.transform(FetchPacket {
-                            addr,
-                            bytes,
-                            btb_pred,
-                        });
-                        //TODO BP prediction
+                        unit.out_queue = predecode.transform(FetchPacket { addr, bytes, pred });
                         None
                     }
-                    Err(h) => Some((h, btb_pred)),
+                    Err(h) => Some((h, pred)),
                 }
             })
             .unwrap_or_else(|| {
@@ -122,21 +117,21 @@ where
     }
 }
 
-pub struct FetchTrans<'u, 'm, 'a, 'g, 'd, M>
+pub struct FetchTrans<'u, 'm, 'g, 'd, M>
 where
     M: Mem<LdReq<Exception>, Output = Result<ReqData, Exception>>,
 {
     item: Option<&'u Predecoded>,
-    _lock: PhantomData<FetchLock<'u, 'm, 'a, 'g, 'd, M>>,
+    _lock: PhantomData<FetchLock<'u, 'm, 'g, 'd, M>>,
 }
 
-impl<'u, 'm, 'a, 'g, 'd, M> Transformer<'u> for FetchTrans<'u, 'm, 'a, 'g, 'd, M>
+impl<'u, 'm, 'g, 'd, M> Transformer<'u> for FetchTrans<'u, 'm, 'g, 'd, M>
 where
     M: Mem<LdReq<Exception>, Output = Result<ReqData, Exception>>,
 {
     type In = ();
     type Out = &'u Predecoded;
-    type Lock = FetchLock<'u, 'm, 'a, 'g, 'd, M>;
+    type Lock = FetchLock<'u, 'm, 'g, 'd, M>;
 
     fn transform(&mut self, _: &Self::Lock, _: Self::In) -> Option<Self::Out> {
         self.item

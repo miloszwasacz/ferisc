@@ -1,4 +1,4 @@
-use crate::core::{csr::CsrAddr, reg::int::IntVal};
+use crate::core::{csr::CsrAddr, reg::int::IntVal, uop::fetch::BtbPred};
 use crate::mem::Addr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,6 +25,7 @@ pub enum Uop<R, S, D> {
         offset: IntVal,
         link: D,
         link_addr: Addr,
+        pred: BtbPred,
     },
     Br {
         cmp: BrCmp,
@@ -32,6 +33,7 @@ pub enum Uop<R, S, D> {
         src2: R,
         target: Addr,
         pred: bool,
+        btb_pred: BtbPred,
     },
     Ld {
         size: usize,

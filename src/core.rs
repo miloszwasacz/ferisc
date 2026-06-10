@@ -30,7 +30,8 @@ pub struct Core {
 
 impl Core {
     pub fn tick(&mut self) {
-        let mut addr_gen = self.addr_gen.lock();
+        let addr_gen = self.addr_gen.lock();
+        let mode = self.mode.read_copied();
 
         //TODO Process tick
         {
@@ -39,11 +40,11 @@ impl Core {
             // Fetch
             let fetch = self
                 .fetch
-                .fetch(imem.deref_mut(), &mut addr_gen, self.predecode.lock());
+                .fetch(imem.deref_mut(), addr_gen.clone(), self.predecode.lock());
 
             // Decode
             PipelineStage::new(fetch)
-                .substage(self.decode.decode(&self.csrf, self.mode.read_copied()))
+                .substage(self.decode.decode(&self.csrf, addr_gen.clone(), mode))
                 .execute();
         }
 

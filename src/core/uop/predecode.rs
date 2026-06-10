@@ -1,4 +1,5 @@
 use super::Exception;
+use super::fetch::BtbPred;
 use crate::mem::Addr;
 
 #[derive(Debug, Clone, Copy)]
@@ -16,6 +17,5 @@ pub enum PdcdBytes {
 #[derive(Debug, Clone, Copy)]
 pub struct Meta {
     pub addr: Addr,
-    //TODO BP
-    pub pred: bool,
+    pub pred: BtbPred,
 }

@@ -35,14 +35,17 @@ int_inst! {
     }
 
     #[allow(unused_variables)]
-    pub(in super::super) jalr(fmt: I, Meta { addr: pc, .. }, _): Jalr {
+    pub(in super::super) jalr(fmt: I, Meta { addr: pc, pred }, _): Jalr {
         base: fmt.rs1,
         offset: fmt.imm,
         link: fmt.rd,
         link_addr: pc.wrapping_add(4),
+        pred,
     }
 }
 
+// The branch predictions need to be updated later, once the decoding is done,
+// since some BPs need the target address.
 branch! {
     pub(in super::super) beq(Eq)
     pub(in super::super) bne(Ne)
