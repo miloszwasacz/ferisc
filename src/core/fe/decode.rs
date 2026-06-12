@@ -9,8 +9,8 @@ use crate::core::{
     },
 };
 use crate::seq::{
+    Queue,
     locks::{LockCompose, StageLock},
-    queue::Queue,
 };
 
 pub mod rv32;

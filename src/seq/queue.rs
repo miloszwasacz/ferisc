@@ -1,6 +1,6 @@
 //TODO Better docs
 
-pub use self::locks::{PopTrans, PushTrans, QueuePopLock, QueuePushLock};
+pub use self::locks::{PopLock, PopTrans, PushLock, PushTrans};
 use super::{Clearable, Sequential};
 use std::collections::vec_deque::{self, VecDeque};
 
@@ -39,35 +39,35 @@ impl<T> Queue<T> {
         self.buf.iter().take(self.len)
     }
 
-    /// Returns a [`CircuitLock`] used for pushing new elements into the queue.
+    /// Returns a [`StageLock`] used for pushing new elements into the queue.
     ///
     /// The elements are pushed in the order of their arrival. It is up to the
     /// user of this lock to ensure that the incoming elements are in the correct
     /// order[^1].
     ///
     /// [^1]: [Popping](Self::pop) from another in-order queue can guarantee this.
-    pub fn push(&mut self) -> QueuePushLock<'_, T> {
+    pub fn push(&mut self) -> PushLock<'_, T> {
         #[cfg(debug_assertions)]
         assert!(
             !self.state.contains(State::PUSHED),
             "cannot push new elements more than once per clock cycle"
         );
-        QueuePushLock::new(self)
+        PushLock::new(self)
     }
 
-    /// Returns a [`CircuitLock`] used for popping elements from the queue.
+    /// Returns a [`StageLock`] used for popping elements from the queue.
     ///
     /// The elements are popped in the same order of as they were previously
     /// [pushed](Self::push). This is useful when chaining in-order pipeline stages,
     /// such as decoding or register renaming, with queues between them acting
     /// as pipeline registers.
-    pub fn pop(&mut self, max_count: usize) -> QueuePopLock<'_, T> {
+    pub fn pop(&mut self, max_count: usize) -> PopLock<'_, T> {
         #[cfg(debug_assertions)]
         assert!(
             !self.state.contains(State::POPPED),
             "cannot remove elements more than once per clock cycle"
         );
-        QueuePopLock::new(self, max_count)
+        PopLock::new(self, max_count)
     }
 }
 

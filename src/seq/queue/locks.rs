@@ -1,44 +1,28 @@
 use super::Queue;
 use crate::seq::locks::{CircuitLock, Transformer};
-use std::collections::VecDeque;
 use std::marker::PhantomData;
 
 type Iter<'a, T> = std::iter::Take<super::Iter<'a, T>>;
 
 //#region Push
 
-pub struct QueuePushLock<'a, T> {
+pub struct PushLock<'a, T> {
     queue: &'a mut Queue<T>,
-    pushed: VecDeque<T>,
+    free_space: usize,
 }
 
-impl<'a, T> QueuePushLock<'a, T> {
+impl<'a, T> PushLock<'a, T> {
     pub(super) fn new(queue: &'a mut Queue<T>) -> Self {
-        Self {
-            queue,
-            pushed: VecDeque::new(),
-        }
-    }
-
-    fn free_space(&self) -> usize {
-        self.queue.size - self.queue.len - self.pushed.len()
+        let free_space = queue.size - queue.len;
+        Self { queue, free_space }
     }
 }
 
-impl<'a, T> CircuitLock<'a> for QueuePushLock<'a, T> {
+impl<'a, T> CircuitLock<'a> for PushLock<'a, T> {
     type Trans = PushTrans<T>;
 
     fn make_trans(&mut self) -> Self::Trans {
         PushTrans(None)
-    }
-}
-
-impl<'a, T> Drop for QueuePushLock<'a, T> {
-    fn drop(&mut self) {
-        debug_assert!(self.free_space() >= self.pushed.len());
-        self.queue.buf.append(&mut self.pushed);
-        #[cfg(debug_assertions)]
-        self.queue.state.insert(super::State::PUSHED);
     }
 }
 
@@ -47,10 +31,10 @@ pub struct PushTrans<T>(Option<T>);
 impl<'a, T: 'a> Transformer<'a> for PushTrans<T> {
     type In = T;
     type Out = ();
-    type Lock = QueuePushLock<'a, T>;
+    type Lock = PushLock<'a, T>;
 
     fn transform(&mut self, lock: &Self::Lock, input: Self::In) -> Option<Self::Out> {
-        if lock.free_space() != 0 {
+        if lock.free_space > 0 {
             self.0 = Some(input);
             Some(())
         } else {
@@ -59,7 +43,11 @@ impl<'a, T: 'a> Transformer<'a> for PushTrans<T> {
     }
 
     fn commit(mut self, lock: &mut Self::Lock) {
-        lock.pushed.push_back(self.0.take().unwrap());
+        debug_assert!(lock.free_space > 0);
+        lock.queue.buf.push_back(self.0.take().unwrap());
+        lock.free_space -= 1;
+        #[cfg(debug_assertions)]
+        lock.queue.state.insert(super::State::PUSHED);
     }
 }
 
@@ -67,18 +55,18 @@ impl<'a, T: 'a> Transformer<'a> for PushTrans<T> {
 
 //#region Pop
 
-pub struct QueuePopLock<'a, T>(Option<PopLock<'a, T>>);
+pub struct PopLock<'a, T>(Option<PopLockImpl<'a, T>>);
 
-struct PopLock<'a, T> {
+struct PopLockImpl<'a, T> {
     queue: *mut Queue<T>,
     iter: Iter<'a, T>,
     popped: usize,
     _queue: PhantomData<&'a mut Queue<T>>,
 }
 
-impl<'a, T> QueuePopLock<'a, T> {
+impl<'a, T> PopLock<'a, T> {
     pub(super) fn new(queue: &'a mut Queue<T>, max_count: usize) -> Self {
-        Self(Some(PopLock {
+        Self(Some(PopLockImpl {
             queue: queue as _,
             iter: queue.iter().take(max_count),
             popped: 0,
@@ -87,7 +75,7 @@ impl<'a, T> QueuePopLock<'a, T> {
     }
 }
 
-impl<'a, T> CircuitLock<'a> for QueuePopLock<'a, T> {
+impl<'a, T> CircuitLock<'a> for PopLock<'a, T> {
     type Trans = PopTrans<'a, T>;
 
     fn make_trans(&mut self) -> Self::Trans {
@@ -95,11 +83,11 @@ impl<'a, T> CircuitLock<'a> for QueuePopLock<'a, T> {
     }
 }
 
-impl<'a, T> Drop for QueuePopLock<'a, T> {
+impl<'a, T> Drop for PopLock<'a, T> {
     fn drop(&mut self) {
         // SAFETY: iter is dropped so it is safe to interact with the queue again
         let (queue, popped) = unsafe {
-            let PopLock {
+            let PopLockImpl {
                 queue,
                 iter,
                 popped,
@@ -121,7 +109,7 @@ pub struct PopTrans<'a, T>(Option<&'a T>);
 impl<'a, T> Transformer<'a> for PopTrans<'a, T> {
     type In = ();
     type Out = &'a T;
-    type Lock = QueuePopLock<'a, T>;
+    type Lock = PopLock<'a, T>;
 
     fn transform(&mut self, _: &Self::Lock, _: Self::In) -> Option<Self::Out> {
         self.0

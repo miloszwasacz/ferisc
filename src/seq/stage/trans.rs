@@ -14,17 +14,19 @@ pub trait Transformer<'a> {
     /// It is important to note that no changes will be [`committed`](Self::commit),
     /// unless all subsequent transformations within the pipeline stage succeed.
     ///
-    /// This method is guaranteed to be called at most once for a given instance of the transformer.
+    /// When used within a [`PipelineStage`](super::PipelineStage), this method
+    /// is guaranteed to be called at most once for a given instance of the transformer.
     /// It will not be called if a previous transformation in the pipeline stage failed.
     fn transform(&mut self, lock: &Self::Lock, input: Self::In) -> Option<Self::Out>;
 
     /// Commits the transformation to the `lock`.
     ///
-    /// This method is guaranteed to be called at most once, and only after the
-    /// [`transformation`](Self::transform) has taken place and all transformations
-    /// defined by the pipeline stage have succeeded for a given element. It is
-    /// also guaranteed to run after all subsequent transformations' commits,
-    /// and before any preceding transformations' commits.
+    /// When used within a [`PipelineStage`](super::PipelineStage), this method
+    /// is guaranteed to be called at most once, and only after the [`transformation`](Self::transform)
+    /// has taken place and all transformations defined by the pipeline stage
+    /// have succeeded for a given element. It is also guaranteed to run after
+    /// all subsequent transformations' commits, and before any preceding
+    /// transformations' commits.
     fn commit(self, lock: &mut Self::Lock);
 }
 

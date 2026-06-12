@@ -1,11 +1,7 @@
 use super::{Transformer, trans::TransCompose};
 
 /// A lock used for transaction-based modifications of a circuit's state that is
-/// placed for the duration of the execution of a [`PipelineStage`].
-///
-/// It is recommended that the lock first gathers all changes that should be
-/// applied to a given circuit within a single clock cycle (e.g. new elements
-/// that should be pushed to a queue), and only commits them when it is [dropped](Drop).
+/// placed for the duration of the execution of a [`PipelineStage`](super::PipelineStage).
 pub trait CircuitLock<'a> {
     /// The type [`Transformer`] that is used to convert a given element,
     /// based on the locked state of the circuit.

@@ -3,7 +3,7 @@ pub use self::queue::Queue;
 pub use self::stage::PipelineStage;
 
 mod buf;
-pub mod queue;
+mod queue;
 mod stage;
 
 /// A trait for a clock-based circuit.
@@ -36,6 +36,11 @@ pub trait Clearable: Sequential {
 pub mod locks {
     pub use super::stage::{CircuitLock, LockCompose, TransCompose, Transformer};
 
+    /// An auto-trait for the [`CircuitLock`] trait that encapsulates all type
+    /// information required for proper usage within a [`PipelineStage`].
+    ///
+    /// This trait is useful for hiding the concrete type of the lock in the
+    /// form of `impl StageLock<...>`
     pub trait StageLock<'a, I, O>:
         CircuitLock<'a, Trans: Transformer<'a, In = I, Out = O, Lock = Self>>
     {
@@ -43,5 +48,9 @@ pub mod locks {
     impl<'a, I, O, L> StageLock<'a, I, O> for L where
         L: CircuitLock<'a, Trans: Transformer<'a, In = I, Out = O, Lock = Self>>
     {
+    }
+
+    pub mod queue {
+        pub use crate::seq::queue::{PopLock, PopTrans, PushLock, PushTrans};
     }
 }
