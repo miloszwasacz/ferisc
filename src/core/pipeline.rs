@@ -1,4 +1,4 @@
-use self::locks::RenameLock;
+use self::locks::{CommitLock, RenameLock};
 use crate::core::{
     reg::{
         ArchReg,
@@ -7,9 +7,8 @@ use crate::core::{
     },
     uop::{decode::Uop as DUop, rename::Uop as RUop},
 };
-use crate::seq::locks::StageLock;
 
-mod locks;
+pub mod locks;
 
 #[derive(derive_more::Debug)]
 pub struct Pipeline<T: ArchReg> {
@@ -23,7 +22,11 @@ pub struct Pipelines {
 }
 
 impl Pipelines {
-    pub fn rename(&mut self) -> impl StageLock<'_, DUop, RUop> {
+    pub fn rename(&mut self) -> RenameLock<'_> {
         RenameLock::new(self)
+    }
+
+    pub fn commit(&mut self) -> CommitLock<'_> {
+        CommitLock::new(self)
     }
 }

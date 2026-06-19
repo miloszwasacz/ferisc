@@ -4,6 +4,7 @@ use crate::core::reg::ArchReg;
 pub mod fence;
 pub mod int;
 
+pub mod commit;
 pub mod decode;
 pub mod fetch;
 pub mod predecode;
