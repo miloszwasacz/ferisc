@@ -1,10 +1,8 @@
+use self::csr::CsrFile;
 use self::fe::{AddrGen, decode::DecodeUnit, fetch::FetchUnit, predecode::Predecoder};
 use self::mem::{DirectHierarchy, MemHierarchy};
 use self::pipeline::Pipelines;
-use crate::{
-    core::{csr::CsrFile, uop::Mode},
-    seq::{Buf, Clearable, PipelineStage},
-};
+use crate::seq::{Buf, Clearable, PipelineStage, Sequential};
 use std::ops::DerefMut;
 
 pub mod fe;
@@ -67,4 +65,17 @@ impl Core {
             |_mem| todo!("flush the rest of the pipeline"),
         );
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum Mode {
+    //TODO More modes than machine mode
+
+    // /// User mode
+    // U,
+    // /// Supervisor mode
+    // S,
+    /// Machine mode
+    #[default]
+    M,
 }

@@ -68,16 +68,3 @@ pub enum Exception {
     // Custom = 48-63,
     // Reserved = >=64,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub enum Mode {
-    //TODO More modes than machine mode
-
-    // /// User mode
-    // U,
-    // /// Supervisor mode
-    // S,
-    /// Machine mode
-    #[default]
-    M,
-}

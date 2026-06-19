@@ -118,7 +118,6 @@ impl<T> Buf<T> {
     }
 }
 
-//TODO Add a note that the state is not preserved (i.e. only the current value is cloned)
 impl<T: Clone> Clone for Buf<T> {
     /// Creates of duplicate of the buffer with the currently stored data.
     ///

@@ -1,9 +1,10 @@
 use super::fmt::*;
 use super::macros::*;
 use crate::core::{
+    Mode,
     reg::int::IntVal,
     uop::{
-        Exception, Mode,
+        Exception,
         decode::{UopKind, int},
         fence::Fence,
         int::*,

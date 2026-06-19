@@ -1,10 +1,11 @@
 pub(in super::super) use super::rv32::c::*;
 use crate::core::{
+    Mode,
     csr::m::misa::Extensions,
     fe::decode::fmt::*,
     reg::int::{IntReg, IntVal},
     uop::{
-        Exception, Mode,
+        Exception,
         decode::{UopKind, int},
         int::{AluOp, Src},
         predecode::Meta,

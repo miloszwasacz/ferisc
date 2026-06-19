@@ -1,11 +1,12 @@
 #![allow(unused_variables, unused_qualifications)] //TODO Remove
 
 use crate::core::{
+    Mode,
     csr::m::misa::Extensions,
     fe::decode::fmt::*,
     reg::int::{IntReg, IntVal, Sint},
     uop::{
-        Exception, Mode,
+        Exception,
         decode::{UopKind, int},
         int::*,
         predecode::Meta,

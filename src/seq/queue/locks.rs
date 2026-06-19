@@ -2,8 +2,6 @@ use super::Queue;
 use crate::seq::locks::{CircuitLock, Transformer};
 use std::marker::PhantomData;
 
-type Iter<'a, T> = std::iter::Take<super::Iter<'a, T>>;
-
 //#region Push
 
 pub struct PushLock<'a, T> {
@@ -59,7 +57,7 @@ pub struct PopLock<'a, T>(Option<PopLockImpl<'a, T>>);
 
 struct PopLockImpl<'a, T> {
     queue: *mut Queue<T>,
-    iter: Iter<'a, T>,
+    iter: std::iter::Take<super::Iter<'a, T>>,
     popped: usize,
     _queue: PhantomData<&'a mut Queue<T>>,
 }

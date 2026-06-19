@@ -2,9 +2,10 @@ pub(in super::super) use self::generated::*;
 use super::fmt::*;
 use super::rv32::macros::*;
 use crate::core::{
+    Mode,
     reg::int::IntVal,
     uop::{
-        Exception, Mode,
+        Exception,
         decode::{UopKind, int},
         int::*,
         predecode::Meta,

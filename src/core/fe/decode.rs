@@ -1,9 +1,10 @@
 use self::lock::DecodeLock;
 use crate::core::{
+    Mode,
     csr::{CsrFile, m::misa::Mxl},
     fe::AddrGenLock,
     uop::{
-        Exception, Mode, UopKind,
+        Exception, UopKind,
         decode::Uop,
         predecode::{PdcdBytes, Predecoded},
     },

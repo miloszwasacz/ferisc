@@ -1,9 +1,9 @@
 use super::Decoder;
 use crate::core::{
+    Mode,
     csr::CsrFile,
     fe::AddrGenLock,
     uop::{
-        Mode,
         decode::{Uop, UopKind, int},
         predecode::Predecoded,
     },
