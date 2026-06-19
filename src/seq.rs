@@ -1,8 +1,10 @@
 pub use self::buf::Buf;
+pub use self::pbuf::Pbuf;
 pub use self::queue::Queue;
 pub use self::stage::PipelineStage;
 
 mod buf;
+mod pbuf;
 mod queue;
 mod stage;
 
