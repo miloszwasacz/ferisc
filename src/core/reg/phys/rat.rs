@@ -1,5 +1,5 @@
 use self::free_list::FreeList;
-use self::locks::RenameLock;
+use self::locks::{CommitLock, RenameLock};
 use super::{Prf, RegIdx};
 use crate::core::reg::ArchReg;
 use crate::seq::{Buf, Sequential};
@@ -55,6 +55,22 @@ impl<T: ArchReg> Rat<T> {
             );
         }
         RenameLock::new(prf, self)
+    }
+
+    pub fn commit<'a>(&'a mut self, prf: &'a mut Prf<T>) -> CommitLock<'a, T> {
+        #[cfg(debug_assertions)]
+        {
+            assert_eq!(
+                prf.id, self.id,
+                "mismatched PRF and RAT IDs: \
+                renaming should occur between corresponding PRF and RAT"
+            );
+            assert!(
+                !self.state.contains(State::COMMITTED),
+                "cannot commit more than once per clock cycle"
+            );
+        }
+        CommitLock::new(prf, self)
     }
 }
 

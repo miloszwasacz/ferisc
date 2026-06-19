@@ -1,4 +1,4 @@
-use super::{Mapping, Rat, free_list::AllocLock};
+use super::{Mapping, Rat, State, free_list::AllocLock};
 use crate::core::{
     reg::{
         ArchReg,
@@ -11,6 +11,7 @@ use crate::core::{
     },
 };
 use crate::seq::locks::{CircuitLock, Transformer};
+use std::collections::VecDeque;
 
 //#region Rename
 
@@ -134,6 +135,75 @@ where
             );
             lock.mapping[arch] = phys;
             lock.allocated.push((phys, value));
+        }
+
+        #[cfg(debug_assertions)]
+        lock.rat.state.insert(State::RENAMED);
+    }
+}
+
+//#endregion
+
+//#region Commit
+
+pub struct CommitLock<'a, T: ArchReg> {
+    prf: &'a mut Prf<T>,
+    rat: &'a mut Rat<T>,
+    mapping: Mapping<RegIdx, T>,
+    deallocated: VecDeque<RegIdx>,
+}
+
+impl<'a, T: ArchReg> CommitLock<'a, T> {
+    pub(super) fn new(prf: &'a mut Prf<T>, rat: &'a mut Rat<T>) -> Self {
+        let mapping = rat.committed.read_copied();
+        Self {
+            prf,
+            rat,
+            mapping,
+            deallocated: VecDeque::new(),
+        }
+    }
+}
+
+impl<'a, T: ArchReg> CircuitLock<'a> for CommitLock<'a, T> {
+    type Trans = CommitTrans<T>;
+
+    fn make_trans(&mut self) -> Self::Trans {
+        CommitTrans(None)
+    }
+}
+
+impl<T: ArchReg> Drop for CommitLock<'_, T> {
+    fn drop(&mut self) {
+        self.rat.committed.write(self.mapping);
+        self.rat
+            .free_list
+            .deallocate(std::mem::take(&mut self.deallocated));
+
+        #[cfg(debug_assertions)]
+        self.rat.state.insert(State::COMMITTED);
+    }
+}
+
+pub struct CommitTrans<T: ArchReg>(Option<RegDest<T>>);
+
+impl<'a, T: ArchReg + 'a> Transformer<'a> for CommitTrans<T> {
+    type In = RegDest<T>;
+    type Out = ();
+    type Lock = CommitLock<'a, T>;
+
+    fn transform(&mut self, lock: &Self::Lock, input: Self::In) -> Option<Self::Out> {
+        lock.prf[*input].try_read().map(|_| {
+            let old = self.0.replace(input);
+            debug_assert!(old.is_none());
+        })
+    }
+
+    fn commit(self, lock: &mut Self::Lock) {
+        let dest = self.0.unwrap();
+        if !dest.arch.is_hardwired() {
+            lock.mapping[dest.arch] = dest.idx;
+            lock.deallocated.push_back(dest.prev);
         }
     }
 }
