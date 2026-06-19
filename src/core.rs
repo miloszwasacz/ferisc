@@ -8,7 +8,6 @@ use std::ops::DerefMut;
 pub mod fe;
 
 pub mod csr;
-mod flush;
 pub mod mem;
 pub mod pipeline;
 pub mod reg;
@@ -54,16 +53,45 @@ impl Core {
         //     .substage(dispatch)
         //     .execute();
 
+        // Flush
         //TODO How to update BTB and BP when flushing?
-        addr_gen.apply().flush_stages(
-            &mut self.mem,
-            |mem| {
-                self.fetch.clear(mem.imem().deref_mut());
-                self.predecode.clear();
-            },
-            || todo!("flush decode"),
-            |_mem| todo!("flush the rest of the pipeline"),
-        );
+        let mut flush_fetch = |mem: &mut DirectHierarchy| {
+            self.fetch.clear(mem.imem().deref_mut());
+            self.predecode.clear();
+        };
+        let flush_decode = || {
+            todo!("flush decode");
+        };
+        match addr_gen.apply() {
+            FlushInfo::None => {}
+            FlushInfo::Fetch => {
+                flush_fetch(&mut self.mem);
+            }
+            FlushInfo::Decode => {
+                flush_fetch(&mut self.mem);
+                flush_decode();
+            }
+            FlushInfo::Execute => {
+                flush_fetch(&mut self.mem);
+                flush_decode();
+                todo!("flush the rest of the pipeline (only up to causing branch)");
+            }
+            FlushInfo::Exception => {
+                flush_fetch(&mut self.mem);
+                flush_decode();
+                todo!("flush the rest of the pipeline on exception");
+            }
+        }
+
+        self.finish_cycle();
+    }
+}
+
+impl Sequential for Core {
+    fn finish_cycle(&mut self) {
+        self.fetch.finish_cycle();
+        self.predecode.finish_cycle();
+        todo!("finish cycle");
     }
 }
 
@@ -78,4 +106,14 @@ pub enum Mode {
     /// Machine mode
     #[default]
     M,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum FlushInfo {
+    #[default]
+    None,
+    Fetch,
+    Decode,
+    Execute,
+    Exception,
 }

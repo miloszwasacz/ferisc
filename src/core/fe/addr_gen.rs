@@ -1,4 +1,4 @@
-use crate::core::flush::FlushInfo;
+use crate::core::FlushInfo;
 use crate::mem::Addr;
 use crate::seq::{Buf, Sequential};
 use std::cell::RefCell;
@@ -71,14 +71,23 @@ impl<'a> AddrGenLock<'a> {
         self.0.borrow_mut().mux.add_input(Mux::Decode(jump_target));
     }
 
-    pub fn commit(&mut self, next_pc: Addr) {
-        self.0.borrow_mut().mux.add_input(Mux::Commit(next_pc));
+    pub fn execute(&mut self, jump_target: Addr) {
+        self.0.borrow_mut().mux.add_input(Mux::Execute(jump_target));
+    }
+
+    pub fn exception(&mut self, next_pc: Addr) {
+        self.0.borrow_mut().mux.add_input(Mux::Exception(next_pc));
     }
 
     pub fn apply(self) -> FlushInfo {
         let mut lock = self.0.borrow_mut();
         let next_pc = match lock.mux {
-            Mux::Fetch(pc) | Mux::Btb(pc) | Mux::Bp(pc) | Mux::Decode(pc) | Mux::Commit(pc) => pc,
+            Mux::Fetch(pc)
+            | Mux::Btb(pc)
+            | Mux::Bp(pc)
+            | Mux::Decode(pc)
+            | Mux::Execute(pc)
+            | Mux::Exception(pc) => pc,
             Mux::None => panic!("at least one input must be supplied to the multiplexer"),
         };
         lock.addr_gen.next_pc.write(next_pc);
@@ -88,10 +97,11 @@ impl<'a> AddrGenLock<'a> {
         }
 
         match lock.mux {
-            Mux::Fetch(_) | Mux::Btb(_) => FlushInfo::none(),
-            Mux::Bp(_) => FlushInfo::fetch(),
-            Mux::Decode(_) => FlushInfo::decode(),
-            Mux::Commit(_) => FlushInfo::commit(),
+            Mux::Fetch(_) | Mux::Btb(_) => FlushInfo::None,
+            Mux::Bp(_) => FlushInfo::Fetch,
+            Mux::Decode(_) => FlushInfo::Decode,
+            Mux::Execute(_) => FlushInfo::Execute,
+            Mux::Exception(_) => FlushInfo::Exception,
             Mux::None => unreachable!(),
         }
     }
@@ -112,7 +122,8 @@ enum Mux {
     Btb(Addr),
     Bp(Addr),
     Decode(Addr),
-    Commit(Addr),
+    Execute(Addr),
+    Exception(Addr),
     //TODO Interrupts
 }
 
