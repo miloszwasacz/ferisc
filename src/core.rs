@@ -53,6 +53,9 @@ impl Core {
         //     .substage(dispatch)
         //     .execute();
 
+        let cycle = self.csrf.mcycle.read();
+        self.csrf.mcycle.implicit_write(cycle + 1);
+
         // Flush
         //TODO How to update BTB and BP when flushing?
         let mut flush_fetch = |mem: &mut DirectHierarchy| {

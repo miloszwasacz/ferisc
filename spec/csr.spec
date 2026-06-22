@@ -18,17 +18,17 @@
 # 0x306,M,RW,mcounteren
 # # Machine Trap Handling
 # 0x340,M,RW,mscratch
-# 0x341,M,RW,mepc
-# 0x342,M,RW,mcause
+0x341,mepc
+0x342,mcause
 # 0x343,M,RW,mtval
 # 0x344,M,RW,mip
 # 0x34A,M,RW,mtinst
 # 0x34B,M,RW,mtval2
 # # Machine Configuration
 # 0x30A,M,RW,menvcfg
-# # Machine Counter/Timers
-# 0xB00,M,RW,mcycle
-# 0xB02,M,RW,minstret
+# # Machine Counters/Timers
+0xB00,mcycle
+0xB02,minstret
 # 0xB03,M,RW,mhpmcounter3
 # 0xB04,M,RW,mhpmcounter4
 # 0xB05,M,RW,mhpmcounter5

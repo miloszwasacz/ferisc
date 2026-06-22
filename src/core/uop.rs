@@ -1,5 +1,6 @@
 use self::fence::Fence;
 use crate::core::reg::ArchReg;
+use strum::FromRepr;
 
 pub mod fence;
 pub mod int;
@@ -24,7 +25,8 @@ pub trait InferUop<T: ArchReg> {
 #[allow(type_alias_bounds)]
 pub type Infer<U: InferUop<T>, T> = <U as InferUop<T>>::Kind;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr)]
+#[repr(u64)]
 pub enum Exception {
     /// Instruction address misaligned
     InstrAddrMisaligned = 0,

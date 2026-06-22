@@ -86,6 +86,7 @@ impl Default for Extensions {
 
 impl Csr for Misa {
     fn new_value(&self, _: IntVal) -> Result<Self, Exception> {
+        // MXL has to be read-only because the implementation implicitly has MXLEN=64
         //TODO Allow modifying the `misa` CSR
         Ok(*self)
     }

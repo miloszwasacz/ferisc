@@ -157,11 +157,17 @@ pub(in super::super) fn ebreak(_: I, _: Meta, _: Mode) -> UopKind {
     UopKind::Except(Exception::Breakpoint)
 }
 
-pub(in super::super) fn mret(_: I, _: Meta, _: Mode) -> UopKind {
+pub(in super::super) fn mret(_: I, _: Meta, mode: Mode) -> UopKind {
+    if mode != Mode::M {
+        return UopKind::Except(Exception::Illegal);
+    }
     todo!("mret")
 }
 
-pub(in super::super) fn wfi(_: I, _: Meta, _: Mode) -> UopKind {
+pub(in super::super) fn wfi(_: I, _: Meta, mode: Mode) -> UopKind {
+    if mode != Mode::M {
+        return UopKind::Except(Exception::Illegal);
+    }
     todo!("wfi")
 }
 
