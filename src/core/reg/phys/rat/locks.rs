@@ -12,6 +12,7 @@ use crate::core::{
 };
 use crate::seq::locks::{CircuitLock, Transformer};
 use std::collections::VecDeque;
+use std::marker::PhantomData;
 
 //#region Rename
 
@@ -93,6 +94,7 @@ where
                 #[cfg(debug_assertions)]
                 id: lock.rat.id,
                 idx: lock.mapping[reg],
+                _arch: PhantomData,
             },
             |reg, value| {
                 if reg.is_hardwired() {
@@ -101,6 +103,7 @@ where
                             #[cfg(debug_assertions)]
                             id: lock.rat.id,
                             idx: HARDWIRED_IDX,
+                            _arch: PhantomData,
                         },
                         arch: reg,
                         prev: HARDWIRED_IDX,
@@ -114,6 +117,7 @@ where
                             #[cfg(debug_assertions)]
                             id: lock.rat.id,
                             idx,
+                            _arch: PhantomData,
                         },
                         arch: reg,
                         prev: lock.mapping[reg],

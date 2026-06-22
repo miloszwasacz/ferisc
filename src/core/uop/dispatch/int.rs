@@ -3,12 +3,13 @@ use crate::core::{
     mem::AddrHandle,
     reg::{
         int::{IntReg, IntVal},
-        phys::{self, RegOper},
+        phys,
     },
     uop::{InferUop, fetch::BtbPred, int::*},
 };
 use crate::mem::Addr;
 
+type RegOper = phys::RegOper<IntReg>;
 type RegDest = phys::RegDest<IntReg>;
 
 #[derive(Debug, Clone)]

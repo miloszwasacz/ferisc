@@ -3,6 +3,7 @@ pub use self::rat::Rat;
 use super::ArchReg;
 use crate::seq::Sequential;
 use std::iter::repeat_with;
+use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut, Index, IndexMut};
 
 mod preg;
@@ -85,33 +86,34 @@ impl<T: ArchReg> Sequential for Prf<T> {
 type RegIdx = usize;
 
 /// Physical register operand
-#[derive(Debug, Clone, Copy)]
-pub struct RegOper {
+#[derive(Debug, Clone, Copy, Hash)]
+pub struct RegOper<T> {
     #[cfg(debug_assertions)]
     id: usize,
     idx: RegIdx,
+    _arch: PhantomData<T>,
 }
 
 /// Physical register destination
 #[derive(Debug, Clone, Copy)]
 pub struct RegDest<T> {
-    oper: RegOper,
+    oper: RegOper<T>,
     arch: T,
     prev: RegIdx,
 }
 
-impl<T: ArchReg> Index<RegOper> for Prf<T> {
+impl<T: ArchReg> Index<RegOper<T>> for Prf<T> {
     type Output = PhysReg<T::Repr>;
 
-    fn index(&self, index: RegOper) -> &Self::Output {
+    fn index(&self, index: RegOper<T>) -> &Self::Output {
         #[cfg(debug_assertions)]
         assert_eq!(self.id, index.id, "invalid register file");
         self.regs.index(index.idx)
     }
 }
 
-impl<T: ArchReg> IndexMut<RegOper> for Prf<T> {
-    fn index_mut(&mut self, index: RegOper) -> &mut Self::Output {
+impl<T: ArchReg> IndexMut<RegOper<T>> for Prf<T> {
+    fn index_mut(&mut self, index: RegOper<T>) -> &mut Self::Output {
         #[cfg(debug_assertions)]
         assert_eq!(self.id, index.id, "invalid register file");
         self.regs.index_mut(index.idx)
@@ -119,7 +121,7 @@ impl<T: ArchReg> IndexMut<RegOper> for Prf<T> {
 }
 
 impl<T> Deref for RegDest<T> {
-    type Target = RegOper;
+    type Target = RegOper<T>;
 
     fn deref(&self) -> &Self::Target {
         &self.oper

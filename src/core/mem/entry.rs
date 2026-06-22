@@ -1,4 +1,8 @@
-use crate::core::{reg::phys::RegOper, rob, uop::commit::Dest};
+use crate::core::{
+    reg::{int::IntReg, phys::RegOper},
+    rob,
+    uop::commit::Dest,
+};
 use crate::mem::Addr;
 use crate::seq::Buf;
 use std::cell::RefCell;
@@ -39,12 +43,12 @@ pub(super) struct LdEntry {
 #[derive(Debug, Clone)]
 pub(super) struct StEntry {
     pub size: usize,
-    pub src: (StType, RegOper),
+    pub src: Src,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) enum StType {
-    Int,
+#[derive(Debug, Clone, Copy)]
+pub(super) enum Src {
+    Int(RegOper<IntReg>),
 }
 
 //#endregion
