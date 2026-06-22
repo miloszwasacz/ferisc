@@ -28,7 +28,7 @@ macro_rules! fields {
         ::paste::paste! {
             impl Fence {
                 $(
-                pub fn [<$field:lower>](&self) -> bool {
+                pub const fn [<$field:lower>](&self) -> bool {
                     self.0.contains(Fields::[<$field:upper>])
                 }
                 )*
@@ -37,3 +37,9 @@ macro_rules! fields {
     };
 }
 fields!(pi, po, pr, pw, si, so, sr, sw);
+
+impl Fence {
+    pub const fn is_none(&self) -> bool {
+        self.0.is_empty()
+    }
+}

@@ -1,6 +1,6 @@
 use self::csr::CsrFile;
 use self::fe::{AddrGen, decode::DecodeUnit, fetch::FetchUnit, predecode::Predecoder};
-use self::mem::{DirectHierarchy, MemHierarchy};
+use self::mem::{DirectHierarchy, MemSubsystem};
 use self::pipeline::Pipelines;
 use self::rob::Rob;
 use crate::seq::{Buf, Clearable, PipelineStage, Sequential};
@@ -23,7 +23,7 @@ pub struct Core {
     pipelines: Pipelines,
     rob: Rob,
 
-    mem: DirectHierarchy,
+    mem: MemSubsystem<DirectHierarchy>,
     csrf: CsrFile,
     mode: Buf<Mode>,
 }
@@ -61,7 +61,7 @@ impl Core {
 
         // Flush
         //TODO How to update BTB and BP when flushing?
-        let mut flush_fetch = |mem: &mut DirectHierarchy| {
+        let mut flush_fetch = |mem: &mut MemSubsystem<DirectHierarchy>| {
             self.fetch.clear(mem.imem().deref_mut());
             self.predecode.clear();
         };
