@@ -3,6 +3,7 @@ use crate::core::{
     reg::int::IntVal,
     uop::{Exception, int::CsrOp},
 };
+use crate::seq::Sequential;
 use ferisc_macros::csr_file;
 
 csr_file! {

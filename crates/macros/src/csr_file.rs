@@ -79,6 +79,37 @@ pub fn proc_macro(input: TokenStream) -> TokenStream {
             },
         }
     });
+    let commit_arms = spec.iter().map(|spec| {
+        let ty = spec.name();
+        let field = spec.field_name();
+        match spec.alias() {
+            None => quote! {
+                #ty::ADDR => self.#field.commit(),
+            },
+            Some(aliased) => quote! {
+                #ty::ADDR => self.#aliased.commit(),
+            },
+        }
+    });
+    let flush_arms = spec.iter().map(|spec| {
+        let ty = spec.name();
+        let field = spec.field_name();
+        match spec.alias() {
+            None => quote! {
+                #ty::ADDR => self.#field.flush(),
+            },
+            Some(aliased) => quote! {
+                #ty::ADDR => self.#aliased.flush(),
+            },
+        }
+    });
+    let finish_cycle = spec
+        .iter()
+        .filter(|spec| spec.alias().is_none())
+        .map(|spec| {
+            let field = spec.field_name();
+            quote! { self.#field.finish_cycle(); }
+        });
 
     quote! {
         #( #attrs )*
@@ -92,6 +123,26 @@ pub fn proc_macro(input: TokenStream) -> TokenStream {
                     #( #access_arms )*
                     _ => Err(Exception::Illegal),
                 }
+            }
+
+            pub fn commit(&mut self, csr: CsrAddr) {
+                match csr {
+                    #( #commit_arms )*
+                    _ => panic!("unimplemented csr"),
+                }
+            }
+
+            pub fn flush(&mut self, csr: CsrAddr) {
+                match csr {
+                    #( #flush_arms )*
+                    _ => panic!("unimplemented csr"),
+                }
+            }
+        }
+
+        impl Sequential for #ident #where_clause {
+            fn finish_cycle(&mut self) {
+                #( #finish_cycle )*
             }
         }
 
