@@ -8,7 +8,9 @@ pub mod int;
 pub mod commit;
 pub mod decode;
 pub mod dispatch;
+pub mod execute;
 pub mod fetch;
+pub mod issue;
 pub mod predecode;
 pub mod rename;
 

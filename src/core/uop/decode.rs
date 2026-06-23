@@ -17,7 +17,7 @@ pub mod int {
         uop::int::{self, Src},
     };
 
-    pub type Uop = int::Uop<IntReg, Src<IntReg>, IntReg>;
+    pub type Uop = int::FeUop<IntReg, Src<IntReg>, IntReg>;
 
     impl InferUop<IntReg> for super::Uop {
         type Kind = Uop;

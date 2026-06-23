@@ -63,11 +63,15 @@ impl<'a, 'g, D: Decoder + 'a> Transformer<'a> for DecodeTrans<'a, 'g, D> {
         self.decoder.map(|decoder| {
             let mut uop = decoder.decode(*input, lock.csrf, lock.mode);
             match &mut uop.kind {
-                UopKind::Int(int::Uop::Jal { target, .. }) => {
+                UopKind::Int(int::Uop::Jal { target, pred, .. })
+                    if pred.is_none_or(|addr| addr != *target) =>
+                {
                     let old = self.jump.replace(*target);
                     debug_assert!(old.is_none());
+                    //TODO Notify BTB
                 }
                 UopKind::Int(int::Uop::Br {
+                    next,
                     target,
                     pred,
                     btb_pred,
@@ -75,8 +79,18 @@ impl<'a, 'g, D: Decoder + 'a> Transformer<'a> for DecodeTrans<'a, 'g, D> {
                 }) => {
                     *pred = false; // TODO BP
                     let old = match *btb_pred {
+                        // Taken, but no BTB prediction
                         None if *pred => self.jump.replace(*target),
-                        Some(addr) if !*pred || addr != *target => self.jump.replace(*target),
+                        // Not-taken, but BTB predicted taken
+                        Some(_) if !*pred => {
+                            //TODO Notify BTB
+                            self.jump.replace(*next)
+                        }
+                        // Taken, but BTB predicted the wrong target
+                        Some(addr) if addr != *target => {
+                            //TODO Notify BTB
+                            self.jump.replace(*target)
+                        }
                         _ => None,
                     };
                     debug_assert!(old.is_none());

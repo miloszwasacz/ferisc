@@ -1,8 +1,16 @@
-use crate::core::{csr::CsrAddr, reg::int::IntVal, uop::fetch::BtbPred};
+use crate::core::{
+    csr::CsrAddr,
+    mem::AddrHandle,
+    reg::{
+        int::{IntReg, IntVal},
+        phys::RegDest,
+    },
+    uop::fetch::BtbPred,
+};
 use crate::mem::Addr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Uop<R, S, D> {
+pub enum FeUop<R, S, D> {
     Alu {
         op: AluOp,
         src1: S,
@@ -19,6 +27,7 @@ pub enum Uop<R, S, D> {
         target: Addr,
         link: D,
         link_addr: Addr,
+        pred: BtbPred,
     },
     Jalr {
         base: R,
@@ -31,6 +40,7 @@ pub enum Uop<R, S, D> {
         cmp: BrCmp,
         src1: R,
         src2: R,
+        next: Addr,
         target: Addr,
         pred: bool,
         btb_pred: BtbPred,
@@ -53,6 +63,51 @@ pub enum Uop<R, S, D> {
         csr: CsrAddr,
         src: S,
         dest: D,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum EeUop<S, R> {
+    Alu {
+        op: AluOp,
+        src1: S,
+        src2: S,
+        dest: RegDest<IntReg>,
+    },
+    Mul {
+        op: MulOp,
+        src1: R,
+        src2: R,
+        dest: RegDest<IntReg>,
+    },
+    Jalr {
+        base: R,
+        offset: IntVal,
+        pred: BtbPred,
+    },
+    Br {
+        cmp: BrCmp,
+        src1: R,
+        src2: R,
+        next: Addr,
+        target: Addr,
+        pred: bool,
+    },
+    Lda {
+        base: R,
+        offset: IntVal,
+        dest: AddrHandle,
+    },
+    Sta {
+        base: R,
+        offset: IntVal,
+        dest: AddrHandle,
+    },
+    Csr {
+        op: CsrOp,
+        csr: CsrAddr,
+        src: S,
+        dest: RegDest<IntReg>,
     },
 }
 

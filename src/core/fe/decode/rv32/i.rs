@@ -29,10 +29,11 @@ int_inst! {
     }
 
     #[allow(unused_variables)]
-    pub(in super::super) jal(fmt: J, Meta { addr: pc, .. }, _): Jal {
+    pub(in super::super) jal(fmt: J, Meta { addr: pc, pred }, _): Jal {
         target: pc.wrapping_add_signed(fmt.imm.s()),
         link: fmt.rd,
         link_addr: pc.wrapping_add(4),
+        pred,
     }
 
     #[allow(unused_variables)]

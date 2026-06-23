@@ -169,7 +169,7 @@ pub(in super::super) fn c_addi(fmt: CI, _: Meta, _: Mode) -> UopKind {
     })
 }
 
-fn c_jal(fmt: CJ, meta: Meta, _: Mode) -> UopKind {
+fn c_jal(fmt: CJ, Meta { addr: pc, pred }: Meta, _: Mode) -> UopKind {
     let mut imm_enc = fmt.target2 as i16;
     let imm5 = imm_part!(1, imm_enc) << 5;
     let imm1 = imm_part!(3, imm_enc) << 1;
@@ -180,12 +180,13 @@ fn c_jal(fmt: CJ, meta: Meta, _: Mode) -> UopKind {
     let imm4 = imm_part!(1, imm_enc) << 4;
     let imm11 = imm_part!(1, imm_enc, sign extend) << 11;
     let offset = imm11 | imm10 | imm8 | imm7 | imm6 | imm5 | imm4 | imm1;
-    let target = meta.addr.wrapping_add_signed(offset as _);
+    let target = pc.wrapping_add_signed(offset as _);
 
     UopKind::Int(int::Uop::Jal {
         target,
         link: IntReg::RA,
-        link_addr: meta.addr.wrapping_add(2),
+        link_addr: pc.wrapping_add(2),
+        pred,
     })
 }
 
@@ -337,7 +338,7 @@ pub(in super::super) fn c_addw(_: CA, _: Meta, _: Mode) -> UopKind {
     RESERVED
 }
 
-pub(in super::super) fn c_j(fmt: CJ, meta: Meta, _: Mode) -> UopKind {
+pub(in super::super) fn c_j(fmt: CJ, Meta { addr: pc, pred }: Meta, _: Mode) -> UopKind {
     let mut imm_enc = fmt.target2 as i16;
     let imm5 = imm_part!(1, imm_enc) << 5;
     let imm1 = imm_part!(3, imm_enc) << 1;
@@ -348,12 +349,13 @@ pub(in super::super) fn c_j(fmt: CJ, meta: Meta, _: Mode) -> UopKind {
     let imm4 = imm_part!(1, imm_enc) << 4;
     let imm11 = imm_part!(1, imm_enc, sign extend) << 11;
     let offset = imm11 | imm10 | imm8 | imm7 | imm6 | imm5 | imm4 | imm1;
-    let target = meta.addr.wrapping_add_signed(offset as _);
+    let target = pc.wrapping_add_signed(offset as _);
 
     UopKind::Int(int::Uop::Jal {
         target,
         link: IntReg::ZERO,
-        link_addr: meta.addr.wrapping_add(2),
+        link_addr: pc.wrapping_add(2),
+        pred,
     })
 }
 
@@ -379,6 +381,7 @@ pub(in super::super) fn c_beqz(
         cmp: BrCmp::Eq,
         src1: fmt.rd_rs1,
         src2: IntReg::ZERO,
+        next: pc.wrapping_add(2),
         target,
         // The prediction needs to be updated later, once the decoding is done,
         // since some BPs need the target address.
@@ -409,6 +412,7 @@ pub(in super::super) fn c_bnez(
         cmp: BrCmp::Ne,
         src1: fmt.rd_rs1,
         src2: IntReg::ZERO,
+        next: pc.wrapping_add(2),
         target,
         // The prediction needs to be updated later, once the decoding is done,
         // since some BPs need the target address.

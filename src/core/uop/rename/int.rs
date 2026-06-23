@@ -4,7 +4,7 @@ use crate::core::{
     uop::int::{self, Src},
 };
 
-pub type Uop = int::Uop<RegOper<IntReg>, Src<RegOper<IntReg>>, RegDest<IntReg>>;
+pub type Uop = int::FeUop<RegOper<IntReg>, Src<RegOper<IntReg>>, RegDest<IntReg>>;
 
 impl InferUop<IntReg> for super::Uop {
     type Kind = Uop;
@@ -46,10 +46,12 @@ impl Rename for decode::int::Uop {
                 target,
                 link,
                 link_addr,
+                pred,
             } => Self::Renamed::Jal {
                 target,
                 link: alloc_dest(link, Some(IntVal::address(link_addr)))?,
                 link_addr,
+                pred,
             },
             Self::Jalr {
                 base,
@@ -68,6 +70,7 @@ impl Rename for decode::int::Uop {
                 cmp,
                 src1,
                 src2,
+                next,
                 target,
                 pred,
                 btb_pred,
@@ -75,6 +78,7 @@ impl Rename for decode::int::Uop {
                 cmp,
                 src1: get_oper(src1),
                 src2: get_oper(src2),
+                next,
                 target,
                 pred,
                 btb_pred,

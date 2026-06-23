@@ -103,6 +103,7 @@ impl Drop for ExecuteLock<'_, '_> {
             self.rob
                 .flush
                 .write(Flush::After(cause), FlushPriority::Execute);
+            //TODO Notify BP
         }
     }
 }

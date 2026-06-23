@@ -21,6 +21,7 @@ macro_rules! branch {
                 cmp: BrCmp::$cmp,
                 src1: fmt.rs1,
                 src2: fmt.rs2,
+                next: pc.wrapping_add(4),
                 target: pc.wrapping_add_signed(fmt.imm.s()),
                 // The prediction needs to be updated later, once the decoding is done,
                 // since some BPs need the target address.

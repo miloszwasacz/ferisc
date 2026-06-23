@@ -14,7 +14,7 @@ use std::rc::{Rc, Weak};
 
 mod entry;
 mod flush;
-mod locks;
+pub mod locks;
 
 type Slot = Rc<RefCell<Entry>>;
 
