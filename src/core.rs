@@ -9,6 +9,7 @@ use std::ops::DerefMut;
 pub mod fe;
 
 pub mod csr;
+pub mod eu;
 pub mod mem;
 pub mod pipeline;
 pub mod reg;
