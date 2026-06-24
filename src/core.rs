@@ -14,6 +14,7 @@ pub mod mem;
 pub mod pipeline;
 pub mod reg;
 pub mod rob;
+pub mod rs;
 pub mod uop;
 
 pub struct Core {
@@ -49,13 +50,15 @@ impl Core {
                 .execute();
         }
 
-        // // Rename/Dispatch
-        // let (rename, dispatch) = self.pipelines.locks();
-        // PipelineStage::new(self.decode.lock())
-        //     .substage(rename)
-        //     .substage(self.rob.dispatch())
-        //     .substage(dispatch)
-        //     .execute();
+        // Rename/Dispatch
+        let (rename, dispatch) = self.pipelines.input_locks();
+        PipelineStage::new(self.decode.lock())
+            .copied()
+            .substage(rename)
+            .substage(self.rob.dispatch())
+            .substage(self.mem.dispatch())
+            .substage(dispatch)
+            .execute();
 
         let cycle = self.csrf.mcycle.read();
         self.csrf.mcycle.implicit_write(cycle + 1);

@@ -1,32 +1,36 @@
-use self::locks::{CommitLock, RenameLock};
 use crate::core::{
+    eu::Eu,
     reg::{
         ArchReg,
         int::IntReg,
         phys::{Prf, Rat},
     },
-    uop::{decode::Uop as DUop, rename::Uop as RUop},
+    rs::Rs,
+    uop::{
+        Infer, InferUop, decode::Uop as DecUop, dispatch::Uop as DUop, issue::Issue,
+        rename::Uop as RUop,
+    },
 };
 
 pub mod locks;
 
+type IUop<T> = Infer<DUop, T>;
+type EUop<T> = <IUop<T> as Issue>::Issued;
+type Line<T> = (Rs<IUop<T>>, Eu<EUop<T>>);
+
 #[derive(derive_more::Debug)]
-pub struct Pipeline<T: ArchReg> {
+pub struct Pipeline<T>
+where
+    T: ArchReg,
+    DUop: InferUop<T>,
+    IUop<T>: Issue,
+{
     rat: Rat<T>,
     prf: Prf<T>,
+    lines: Box<[Line<T>]>,
 }
 
 #[derive(Debug)]
 pub struct Pipelines {
     int: Pipeline<IntReg>,
-}
-
-impl Pipelines {
-    pub fn rename(&mut self) -> RenameLock<'_> {
-        RenameLock::new(self)
-    }
-
-    pub fn commit(&mut self) -> CommitLock<'_> {
-        CommitLock::new(self)
-    }
 }
