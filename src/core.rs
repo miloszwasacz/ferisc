@@ -62,6 +62,10 @@ impl Core {
             .substage(dispatch)
             .execute();
 
+        // Issue & Execute
+        self.pipelines
+            .tick(&mut self.rob, &mut self.csrf, addr_gen.clone());
+
         // Commit
         self.rob
             .commit(&mut self.csrf, addr_gen.clone(), &mut self.mode)

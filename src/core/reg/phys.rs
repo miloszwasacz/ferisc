@@ -86,7 +86,7 @@ impl<T: ArchReg> Sequential for Prf<T> {
 type RegIdx = usize;
 
 /// Physical register operand
-#[derive(Debug, Clone, Copy, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RegOper<T> {
     #[cfg(debug_assertions)]
     id: usize,
@@ -95,7 +95,7 @@ pub struct RegOper<T> {
 }
 
 /// Physical register destination
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RegDest<T> {
     oper: RegOper<T>,
     arch: T,

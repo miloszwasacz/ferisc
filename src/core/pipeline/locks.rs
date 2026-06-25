@@ -1,10 +1,14 @@
 use super::{DUop, DecUop, IUop, Pipelines, RUop};
 use crate::core::{
     reg::{ArchReg, int::IntReg, phys::rat::locks as rat},
-    rob, rs,
+    rs,
     uop::{
-        InferUop, commit::Dest, decode::UopKind as DecKind, dispatch::UopKind as DKind,
-        issue::Issue, rename::UopKind as RKind,
+        InferUop,
+        commit::Dest,
+        decode::UopKind as DecKind,
+        dispatch::UopKind as DKind,
+        issue::{self, Issue},
+        rename::UopKind as RKind,
     },
 };
 use crate::seq::locks::{CircuitLock, Transformer};
@@ -137,10 +141,20 @@ impl<'a> Transformer<'a> for DispatchTrans {
         let Self { int, kind } = self;
         debug_assert_matches!(kind, UopKind::None);
 
-        match input.kind {
+        let Self::In {
+            kind: uop,
+            rob_entry,
+        } = input;
+        match uop {
             DKind::Int(uop) => {
                 *kind = UopKind::Int;
-                int.transform(&lock.int, (uop, input.rob_entry))
+                int.transform(
+                    &lock.int,
+                    issue::Uop {
+                        kind: uop,
+                        rob_entry,
+                    },
+                )
             }
             DKind::Handled => Some(()),
         }
@@ -209,7 +223,7 @@ where
     DUop: InferUop<T>,
     IUop<T>: Issue + Clone,
 {
-    type In = (IUop<T>, rob::EntryHandle);
+    type In = issue::Uop<IUop<T>>;
     type Out = ();
     type Lock = PipelineDispatchLock<'a, T>;
 

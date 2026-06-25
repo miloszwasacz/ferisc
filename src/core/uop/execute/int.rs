@@ -1,10 +1,7 @@
-use super::{Execute, Latency};
+use super::{Execute, Latency, WriteReg};
 use crate::core::{
     csr::CsrFile,
-    reg::{
-        int::{IntReg, IntVal, Sint, Uint},
-        phys::Prf,
-    },
+    reg::int::{IntReg, IntVal, Sint, Uint},
     rob::{EntryHandle, locks::ExecuteLock},
     uop::{int::*, issue::int::Uop},
 };
@@ -40,7 +37,7 @@ impl Execute for Uop {
         self,
         mut rob_entry: EntryHandle,
         lock: &mut ExecuteLock<'_, '_>,
-        prf: &mut Prf<Self::Reg>,
+        write_reg: &mut impl WriteReg<Self::Reg>,
         csrf: &mut CsrFile,
     ) {
         type Sword = i32;
@@ -62,53 +59,55 @@ impl Execute for Uop {
                 const SHIFT_MASK: u64 = 0b111111;
                 const WORD_SHIFT_MASK: u32 = 0b11111;
 
-                let reg = &mut prf[*dest];
-                reg.write(match op {
-                    AluOp::Add => IntVal::signed(src1.s().wrapping_add(src2.s())),
-                    AluOp::Sub => IntVal::signed(src1.s().wrapping_sub(src2.s())),
-                    AluOp::And => IntVal::unsigned(src1.u() & src2.u()),
-                    AluOp::Or => IntVal::unsigned(src1.u() | src2.u()),
-                    AluOp::Xor => IntVal::unsigned(src1.u() ^ src2.u()),
-                    AluOp::Sll => {
-                        let sh = src2.u() & SHIFT_MASK;
-                        IntVal::unsigned(src1.u() << sh)
-                    }
-                    AluOp::Srl => {
-                        let sh = src2.u() & SHIFT_MASK;
-                        IntVal::unsigned(src1.u() >> sh)
-                    }
-                    AluOp::Sra => {
-                        let sh = src2.u() & SHIFT_MASK;
-                        IntVal::signed(src1.s() >> sh)
-                    }
-                    AluOp::Slt => IntVal::unsigned(if src1.s() < src2.s() { 1 } else { 0 }),
-                    AluOp::Sltu => IntVal::unsigned(if src1.u() < src2.u() { 1 } else { 0 }),
-                    AluOp::Addw => {
-                        let src1 = src1.s() as Sword;
-                        let src2 = src2.s() as Sword;
-                        IntVal::signed(src1.wrapping_add(src2) as _)
-                    }
-                    AluOp::Subw => {
-                        let src1 = src1.s() as Sword;
-                        let src2 = src2.s() as Sword;
-                        IntVal::signed(src1.wrapping_sub(src2) as _)
-                    }
-                    AluOp::Sllw => {
-                        let src1 = src1.u() as Uword;
-                        let sh = src2.u() as Uword & WORD_SHIFT_MASK;
-                        IntVal::unsigned((src1 << sh) as _)
-                    }
-                    AluOp::Srlw => {
-                        let src1 = src1.u() as Uword;
-                        let sh = src2.u() as Uword & WORD_SHIFT_MASK;
-                        IntVal::unsigned((src1 >> sh) as _)
-                    }
-                    AluOp::Sraw => {
-                        let src1 = src1.s() as Sword;
-                        let sh = src2.u() as Uword & WORD_SHIFT_MASK;
-                        IntVal::signed((src1 >> sh) as _)
-                    }
-                });
+                write_reg.write(
+                    *dest,
+                    match op {
+                        AluOp::Add => IntVal::signed(src1.s().wrapping_add(src2.s())),
+                        AluOp::Sub => IntVal::signed(src1.s().wrapping_sub(src2.s())),
+                        AluOp::And => IntVal::unsigned(src1.u() & src2.u()),
+                        AluOp::Or => IntVal::unsigned(src1.u() | src2.u()),
+                        AluOp::Xor => IntVal::unsigned(src1.u() ^ src2.u()),
+                        AluOp::Sll => {
+                            let sh = src2.u() & SHIFT_MASK;
+                            IntVal::unsigned(src1.u() << sh)
+                        }
+                        AluOp::Srl => {
+                            let sh = src2.u() & SHIFT_MASK;
+                            IntVal::unsigned(src1.u() >> sh)
+                        }
+                        AluOp::Sra => {
+                            let sh = src2.u() & SHIFT_MASK;
+                            IntVal::signed(src1.s() >> sh)
+                        }
+                        AluOp::Slt => IntVal::unsigned(if src1.s() < src2.s() { 1 } else { 0 }),
+                        AluOp::Sltu => IntVal::unsigned(if src1.u() < src2.u() { 1 } else { 0 }),
+                        AluOp::Addw => {
+                            let src1 = src1.s() as Sword;
+                            let src2 = src2.s() as Sword;
+                            IntVal::signed(src1.wrapping_add(src2) as _)
+                        }
+                        AluOp::Subw => {
+                            let src1 = src1.s() as Sword;
+                            let src2 = src2.s() as Sword;
+                            IntVal::signed(src1.wrapping_sub(src2) as _)
+                        }
+                        AluOp::Sllw => {
+                            let src1 = src1.u() as Uword;
+                            let sh = src2.u() as Uword & WORD_SHIFT_MASK;
+                            IntVal::unsigned((src1 << sh) as _)
+                        }
+                        AluOp::Srlw => {
+                            let src1 = src1.u() as Uword;
+                            let sh = src2.u() as Uword & WORD_SHIFT_MASK;
+                            IntVal::unsigned((src1 >> sh) as _)
+                        }
+                        AluOp::Sraw => {
+                            let src1 = src1.s() as Sword;
+                            let sh = src2.u() as Uword & WORD_SHIFT_MASK;
+                            IntVal::signed((src1 >> sh) as _)
+                        }
+                    },
+                );
             }
             Uop::Mul {
                 op,
@@ -118,75 +117,77 @@ impl Execute for Uop {
             } => {
                 const MULH_SHIFT: u32 = Uint::BITS;
 
-                let reg = &mut prf[*dest];
-                reg.write(match op {
-                    MulOp::Mul => IntVal::signed(src1.s().wrapping_mul(src2.s())),
-                    MulOp::Mulh => {
-                        let src1 = src1.s() as Sqword;
-                        let src2 = src2.s() as Sqword;
-                        let out = (src1 * src2) >> MULH_SHIFT;
-                        IntVal::signed(out as _)
-                    }
-                    MulOp::Mulhsu => {
-                        let src1 = src1.s() as Sqword;
-                        let src2 = src2.u() as Uqword as Sqword;
-                        let out = (src1 * src2) >> MULH_SHIFT;
-                        IntVal::signed(out as _)
-                    }
-                    MulOp::Mulhu => {
-                        let src1 = src1.u() as Uqword;
-                        let src2 = src2.u() as Uqword;
-                        let out = (src1 * src2) >> MULH_SHIFT;
-                        IntVal::unsigned(out as _)
-                    }
-                    MulOp::Div => IntVal::signed(match src2.s() {
-                        0 => -1,
-                        src2 => src1.s().overflowing_div(src2).0,
-                    }),
-                    MulOp::Divu => {
-                        IntVal::unsigned(src1.u().checked_div(src2.u()).unwrap_or(Uint::MAX))
-                    }
-                    MulOp::Rem => match src2.s() {
-                        0 => src1,
-                        src2 => IntVal::signed(src1.s().overflowing_rem(src2).0),
-                    },
-                    MulOp::Remu => src1
-                        .u()
-                        .checked_rem(src2.u())
-                        .map(IntVal::unsigned)
-                        .unwrap_or(src1),
-                    MulOp::Mulw => {
-                        let src1 = src1.s() as Sword;
-                        let src2 = src2.s() as Sword;
-                        IntVal::signed(src1.wrapping_mul(src2) as _)
-                    }
-                    MulOp::Divw => {
-                        let src1 = src1.s() as Sword;
-                        let src2 = src2.s() as Sword;
-                        IntVal::signed(match src2 {
+                write_reg.write(
+                    *dest,
+                    match op {
+                        MulOp::Mul => IntVal::signed(src1.s().wrapping_mul(src2.s())),
+                        MulOp::Mulh => {
+                            let src1 = src1.s() as Sqword;
+                            let src2 = src2.s() as Sqword;
+                            let out = (src1 * src2) >> MULH_SHIFT;
+                            IntVal::signed(out as _)
+                        }
+                        MulOp::Mulhsu => {
+                            let src1 = src1.s() as Sqword;
+                            let src2 = src2.u() as Uqword as Sqword;
+                            let out = (src1 * src2) >> MULH_SHIFT;
+                            IntVal::signed(out as _)
+                        }
+                        MulOp::Mulhu => {
+                            let src1 = src1.u() as Uqword;
+                            let src2 = src2.u() as Uqword;
+                            let out = (src1 * src2) >> MULH_SHIFT;
+                            IntVal::unsigned(out as _)
+                        }
+                        MulOp::Div => IntVal::signed(match src2.s() {
                             0 => -1,
-                            src2 => src1.overflowing_div(src2).0,
-                        } as _)
-                    }
-                    MulOp::Divuw => {
-                        let src1 = src1.u() as Uword;
-                        let src2 = src2.u() as Uword;
-                        IntVal::unsigned(src1.checked_div(src2).unwrap_or(Uword::MAX) as _)
-                    }
-                    MulOp::Remw => {
-                        let src1 = src1.s() as Sword;
-                        let src2 = src2.s() as Sword;
-                        IntVal::signed(match src2 {
+                            src2 => src1.s().overflowing_div(src2).0,
+                        }),
+                        MulOp::Divu => {
+                            IntVal::unsigned(src1.u().checked_div(src2.u()).unwrap_or(Uint::MAX))
+                        }
+                        MulOp::Rem => match src2.s() {
                             0 => src1,
-                            src2 => src1.overflowing_rem(src2).0,
-                        } as _)
-                    }
-                    MulOp::Remuw => {
-                        let src1 = src1.u() as Uword;
-                        let src2 = src2.u() as Uword;
-                        IntVal::unsigned(src1.checked_rem(src2).unwrap_or(src1) as _)
-                    }
-                })
+                            src2 => IntVal::signed(src1.s().overflowing_rem(src2).0),
+                        },
+                        MulOp::Remu => src1
+                            .u()
+                            .checked_rem(src2.u())
+                            .map(IntVal::unsigned)
+                            .unwrap_or(src1),
+                        MulOp::Mulw => {
+                            let src1 = src1.s() as Sword;
+                            let src2 = src2.s() as Sword;
+                            IntVal::signed(src1.wrapping_mul(src2) as _)
+                        }
+                        MulOp::Divw => {
+                            let src1 = src1.s() as Sword;
+                            let src2 = src2.s() as Sword;
+                            IntVal::signed(match src2 {
+                                0 => -1,
+                                src2 => src1.overflowing_div(src2).0,
+                            } as _)
+                        }
+                        MulOp::Divuw => {
+                            let src1 = src1.u() as Uword;
+                            let src2 = src2.u() as Uword;
+                            IntVal::unsigned(src1.checked_div(src2).unwrap_or(Uword::MAX) as _)
+                        }
+                        MulOp::Remw => {
+                            let src1 = src1.s() as Sword;
+                            let src2 = src2.s() as Sword;
+                            IntVal::signed(match src2 {
+                                0 => src1,
+                                src2 => src1.overflowing_rem(src2).0,
+                            } as _)
+                        }
+                        MulOp::Remuw => {
+                            let src1 = src1.u() as Uword;
+                            let src2 = src2.u() as Uword;
+                            IntVal::unsigned(src1.checked_rem(src2).unwrap_or(src1) as _)
+                        }
+                    },
+                )
             }
             Uop::Jalr { base, offset, pred } => {
                 let target = base.addr().wrapping_add_signed(offset.s());
@@ -234,8 +235,7 @@ impl Execute for Uop {
             }
             Uop::Csr { op, csr, src, dest } => match csrf.access(csr, op, src) {
                 Ok(out) => {
-                    let reg = &mut prf[*dest];
-                    reg.write(out);
+                    write_reg.write(*dest, out);
                 }
                 Err(ex) => {
                     rob_entry.throw(ex);

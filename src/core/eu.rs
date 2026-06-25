@@ -2,8 +2,9 @@ use self::lock::Lock;
 use crate::core::{
     csr::CsrFile,
     reg::phys::Prf,
-    rob::{self, locks::ExecuteLock},
-    uop::execute::{Execute, Latency},
+    rob::locks::ExecuteLock,
+    rs::{Bypass, BypassBuilder},
+    uop::execute::{Execute, Latency, Uop, WriteReg},
 };
 use crate::seq::{Buf, Sequential, locks::StageLock};
 
@@ -12,8 +13,8 @@ mod lock;
 //TODO Pipelined EU
 #[derive(Debug, Clone, Default)]
 pub struct Eu<U> {
-    uop: Option<(U, rob::EntryHandle)>,
-    new: Option<(U, rob::EntryHandle)>,
+    uop: Option<Uop<U>>,
+    new: Option<Uop<U>>,
     cycles: Buf<Latency>,
     #[cfg(debug_assertions)]
     state: State,
@@ -23,16 +24,16 @@ impl<U: Execute> Eu<U> {
     pub fn issue(
         &mut self,
         rob_lock: &mut ExecuteLock<'_, '_>,
-        prf: &mut Prf<U::Reg>,
+        write_reg: impl WriteReg<U::Reg>,
         csrf: &mut CsrFile,
-    ) -> impl StageLock<'_, (U, rob::EntryHandle), ()> {
+    ) -> impl StageLock<'_, Uop<U>, ()> {
         #[cfg(debug_assertions)]
         assert!(
             !self.state.contains(State::ISSUED),
             "cannot issue more than once in a single clock cycle"
         );
 
-        Lock::new(self, rob_lock, prf, csrf)
+        Lock::new(self, rob_lock, write_reg, csrf)
     }
 
     pub fn tick(
@@ -40,7 +41,7 @@ impl<U: Execute> Eu<U> {
         rob_lock: &mut ExecuteLock<'_, '_>,
         prf: &mut Prf<U::Reg>,
         csrf: &mut CsrFile,
-    ) {
+    ) -> Bypass<U::Reg> {
         #[cfg(debug_assertions)]
         {
             assert!(
@@ -50,14 +51,25 @@ impl<U: Execute> Eu<U> {
             self.state.insert(State::EXECUTED);
         }
 
+        let mut bypass = BypassBuilder::new(prf);
         match self.cycles.read_copied().checked_sub(1) {
             None => {
-                if let Some((uop, rob_entry)) = self.uop.take() {
-                    uop.execute(rob_entry, rob_lock, prf, csrf);
+                if let Some(Uop {
+                    kind: uop,
+                    rob_entry,
+                }) = self.uop.take()
+                {
+                    uop.execute(
+                        rob_entry,
+                        rob_lock,
+                        &mut |reg, val| bypass.write(reg, val),
+                        csrf,
+                    );
                 }
             }
             Some(cycles) => self.cycles.write(cycles),
         }
+        bypass.build()
     }
 }
 

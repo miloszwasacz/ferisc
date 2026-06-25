@@ -1,13 +1,15 @@
+pub use self::bypass::{Bypass, BypassBuilder};
 use self::locks::{DispatchLock, IssueLock};
-use crate::core::rob;
+use crate::core::uop::issue::{Issue, TryReadReg, Uop as IUop};
 use crate::seq::{Buf, Sequential};
 use std::collections::VecDeque;
 
+mod bypass;
 pub mod locks;
 
 #[derive(Debug, Clone)]
 pub struct Rs<U> {
-    entries: VecDeque<(U, rob::EntryHandle)>,
+    entries: VecDeque<IUop<U>>,
     len: Buf<usize>,
     size: usize,
     #[cfg(debug_assertions)]
@@ -25,14 +27,18 @@ impl<U> Rs<U> {
         DispatchLock::new(self)
     }
 
-    pub fn issue(&mut self) -> IssueLock<'_, U> {
+    pub fn issue<'a, R>(&'a mut self, try_read_reg: R) -> IssueLock<'a, U, R>
+    where
+        U: Issue + Clone + 'a,
+        R: TryReadReg<U::Reg>,
+    {
         #[cfg(debug_assertions)]
         assert!(
             !self.state.contains(State::ISSUED),
             "cannot issue more than once per clock cycle"
         );
 
-        todo!()
+        IssueLock::new(self, try_read_reg)
     }
 }
 

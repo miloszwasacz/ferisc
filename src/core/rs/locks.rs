@@ -1,9 +1,10 @@
-use super::Rs;
-use crate::core::{
-    rob,
-    uop::{execute::Execute, issue::Issue},
+use super::{IUop, Rs};
+use crate::core::uop::{
+    execute::Uop as EUop,
+    issue::{Issue, TryReadReg},
 };
 use crate::seq::locks::{CircuitLock, Transformer};
+use std::collections::VecDeque;
 use std::marker::PhantomData;
 
 //#region Dispatch
@@ -32,10 +33,10 @@ impl<'a, U: Issue + 'a> CircuitLock<'a> for DispatchLock<'a, U> {
     }
 }
 
-pub struct DispatchTrans<U>(Option<(U, rob::EntryHandle)>);
+pub struct DispatchTrans<U>(Option<IUop<U>>);
 
 impl<'a, U: Issue + 'a> Transformer<'a> for DispatchTrans<U> {
-    type In = (U, rob::EntryHandle);
+    type In = IUop<U>;
     type Out = ();
     type Lock = DispatchLock<'a, U>;
 
@@ -64,32 +65,99 @@ impl<'a, U: Issue + 'a> Transformer<'a> for DispatchTrans<U> {
 
 //#region Issue
 
-pub struct IssueLock<'a, U>(PhantomData<&'a U>);
+pub struct IssueLock<'a, U, R> {
+    rs: &'a mut Rs<U>,
+    try_read_reg: R,
+    issued: VecDeque<usize>,
+}
 
-impl<'a, U: Execute + 'a> CircuitLock<'a> for IssueLock<'a, U> {
-    type Trans = IssueTrans<U>;
-
-    fn make_trans(&mut self) -> Self::Trans {
-        todo!()
+impl<'a, U, R> IssueLock<'a, U, R>
+where
+    U: Issue + Clone + 'a,
+    R: TryReadReg<U::Reg>,
+{
+    pub(super) fn new(rs: &'a mut Rs<U>, try_read_reg: R) -> Self {
+        Self {
+            rs,
+            try_read_reg,
+            issued: VecDeque::new(),
+        }
     }
 }
 
-pub struct IssueTrans<U>(PhantomData<U>);
+impl<U, R> Drop for IssueLock<'_, U, R> {
+    fn drop(&mut self) {
+        {
+            let mut i = 0;
+            self.rs.entries.retain(|_| {
+                // Retain only the elements that are not in `self.issued` - since we iterate
+                // in order and the indices in `self.issued` are sorted, we only need to check
+                // the first element for a match.
+                let issued = self.issued.pop_front_if(|issued| i == *issued);
+                i += 1;
+                issued.is_none()
+            });
+            debug_assert!(self.issued.is_empty());
+        }
 
-impl<'a, U: Execute + 'a> Transformer<'a> for IssueTrans<U> {
+        #[cfg(debug_assertions)]
+        self.rs.state.insert(super::State::ISSUED);
+    }
+}
+
+impl<'a, U, R> CircuitLock<'a> for IssueLock<'a, U, R>
+where
+    U: Issue + Clone + 'a,
+    for<'b> &'b R: TryReadReg<U::Reg>,
+{
+    type Trans = IssueTrans<U, R>;
+
+    fn make_trans(&mut self) -> Self::Trans {
+        IssueTrans(None, PhantomData)
+    }
+}
+
+pub struct IssueTrans<U, R>(Option<usize>, PhantomData<(U, R)>);
+
+impl<'a, U, R> Transformer<'a> for IssueTrans<U, R>
+where
+    U: Issue + Clone + 'a,
+    for<'b> &'b R: TryReadReg<U::Reg>,
+{
     type In = ();
-    type Out = &'a (U, rob::EntryHandle);
-    type Lock = IssueLock<'a, U>;
+    type Out = EUop<U::Issued>;
+    type Lock = IssueLock<'a, U, R>;
 
-    fn transform(&mut self, lock: &Self::Lock, input: Self::In) -> Option<Self::Out> {
-        todo!()
+    fn transform(&mut self, lock: &Self::Lock, _: Self::In) -> Option<Self::Out> {
+        lock.rs
+            .entries
+            .iter()
+            .take(lock.rs.len.read_copied())
+            .cloned()
+            .enumerate()
+            // We can skip the entries up to and including the last issued one
+            // because they have already been checked
+            .skip(lock.issued.back().map(|i| *i + 1).unwrap_or(0))
+            .find_map(|(i, entry)| {
+                let IUop {
+                    kind: uop,
+                    rob_entry,
+                } = entry;
+
+                uop.issue(&lock.try_read_reg).map(|uop| {
+                    let old = self.0.replace(i);
+                    debug_assert!(old.is_none());
+
+                    EUop {
+                        kind: uop,
+                        rob_entry,
+                    }
+                })
+            })
     }
 
     fn commit(self, lock: &mut Self::Lock) {
-        todo!();
-
-        // #[cfg(debug_assertions)]
-        // lock.rs.state.insert(super::State::ISSUED);
+        lock.issued.push_back(self.0.unwrap());
     }
 }
 
