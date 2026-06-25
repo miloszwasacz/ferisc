@@ -1,9 +1,11 @@
 use self::lock::Lock;
 use crate::core::{
     csr::CsrFile,
+    ee::{
+        rob::locks::ExecuteLock,
+        rs::{Bypass, BypassBuilder},
+    },
     reg::phys::Prf,
-    rob::locks::ExecuteLock,
-    rs::{Bypass, BypassBuilder},
     uop::execute::{Execute, Latency, Uop, WriteReg},
 };
 use crate::seq::{Buf, Sequential, locks::StageLock};

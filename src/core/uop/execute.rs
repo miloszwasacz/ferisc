@@ -1,7 +1,7 @@
 use crate::core::{
     csr::CsrFile,
+    ee::rob::{self, locks::ExecuteLock},
     reg::{ArchReg, phys::RegOper},
-    rob::{self, locks::ExecuteLock},
 };
 
 pub mod int;

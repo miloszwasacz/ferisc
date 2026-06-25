@@ -1,7 +1,7 @@
 use super::execute::Execute;
 use crate::core::{
+    ee::rob,
     reg::{ArchReg, phys::RegOper},
-    rob,
 };
 
 pub mod int;

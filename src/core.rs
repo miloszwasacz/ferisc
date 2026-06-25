@@ -1,20 +1,15 @@
 use self::csr::CsrFile;
+use self::ee::{pipeline::Pipelines, rob::Rob};
 use self::fe::{AddrGen, decode::DecodeUnit, fetch::FetchUnit, predecode::Predecoder};
 use self::mem::{DirectHierarchy, MemSubsystem};
-use self::pipeline::Pipelines;
-use self::rob::Rob;
 use crate::seq::{Buf, Clearable, IntoPipelineStage, PipelineStage, Sequential};
 use std::ops::DerefMut;
 
-pub mod fe;
-
 pub mod csr;
-pub mod eu;
+pub mod ee;
+pub mod fe;
 pub mod mem;
-pub mod pipeline;
 pub mod reg;
-pub mod rob;
-pub mod rs;
 pub mod uop;
 
 pub struct Core {

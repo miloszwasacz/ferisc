@@ -1,7 +1,7 @@
 use super::{DUop, DecUop, IUop, Pipelines, RUop};
 use crate::core::{
+    ee::rs,
     reg::{ArchReg, int::IntReg, phys::rat::locks as rat},
-    rs,
     uop::{
         InferUop,
         commit::Dest,

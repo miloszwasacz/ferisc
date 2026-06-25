@@ -1,6 +1,6 @@
 use crate::core::{
+    ee::rob,
     reg::{int::IntReg, phys::RegOper},
-    rob,
     uop::commit::Dest,
 };
 use crate::mem::Addr;

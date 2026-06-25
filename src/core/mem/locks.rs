@@ -1,6 +1,6 @@
 use super::MemSubsystem;
 use crate::core::{
-    rob,
+    ee::rob,
     uop::{dispatch, rename},
 };
 use crate::seq::locks::{CircuitLock, Transformer};

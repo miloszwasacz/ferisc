@@ -1,8 +1,8 @@
 use super::{Execute, Latency, WriteReg};
 use crate::core::{
     csr::CsrFile,
+    ee::rob::{EntryHandle, locks::ExecuteLock},
     reg::int::{IntReg, IntVal, Sint, Uint},
-    rob::{EntryHandle, locks::ExecuteLock},
     uop::{int::*, issue::int::Uop},
 };
 use static_assertions::const_assert_eq;

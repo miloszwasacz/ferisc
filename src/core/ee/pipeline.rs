@@ -1,14 +1,16 @@
 use crate::core::{
     csr::CsrFile,
-    eu::Eu,
+    ee::{
+        eu::Eu,
+        rob::{Rob, locks::ExecuteLock},
+        rs::Rs,
+    },
     fe::AddrGenLock,
     reg::{
         ArchReg,
         int::IntReg,
         phys::{Prf, Rat},
     },
-    rob::{Rob, locks::ExecuteLock},
-    rs::Rs,
     uop::{
         Infer, InferUop, decode::Uop as DecUop, dispatch::Uop as DUop, execute::Execute,
         issue::Issue, rename::Uop as RUop,

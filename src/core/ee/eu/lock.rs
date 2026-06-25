@@ -1,7 +1,7 @@
 use super::Eu;
 use crate::core::{
     csr::CsrFile,
-    rob,
+    ee::rob,
     uop::execute::{Execute, Uop, WriteReg},
 };
 use crate::seq::locks::{CircuitLock, Transformer};
