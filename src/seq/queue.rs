@@ -30,12 +30,51 @@ impl<T> Queue<T> {
         }
     }
 
+    /// Returns the current number of elements held in the queue.
+    ///
+    /// Note that this does not include any new elements that have been[pushed](Self::push),
+    /// and still includes all elements that have been [popped](Self::pop).
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Returns the queue is currently empty.
+    ///
+    /// Note that this does not include any new elements that have been[pushed](Self::push),
+    /// and still includes all elements that have been [popped](Self::pop).
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Returns the maximal capacity of the queue.
+    pub fn size(&self) -> usize {
+        self.size
+    }
+
     /// Returns an iterator of the elements currently stored within the queue.
     ///
     /// It is important to note that new elements that have been [pushed](Self::push)
     /// within a given clock cycle _will not_ be present in this iterator in this
     /// clock cycle - they will only appear in the next cycle (see [`Sequential`]).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the queue has been [cleared](Self::clear) or [drained](Self::drain_from)
+    /// in this clock cycle.
+    ///
+    /// <div class="warning">
+    ///
+    /// Note that this is only enforced when `debug_assertions`
+    /// are enabled to increase performance of release builds.
+    ///
+    /// </div>
     pub fn iter(&self) -> Iter<'_, T> {
+        #[cfg(debug_assertions)]
+        assert!(
+            !self.state.contains(State::CLEARED),
+            "cannot iterate over a cleared queue"
+        );
+
         self.buf.iter().take(self.len)
     }
 
@@ -69,6 +108,29 @@ impl<T> Queue<T> {
         );
         PopLock::new(self, max_count)
     }
+
+    /// [Drains](VecDeque::drain) the queue, starting at `index` and returning
+    /// an iterator over the removed elements. The elements are yielded int the
+    /// same order as they were in the queue.
+    ///
+    /// # Panics
+    ///
+    /// See the _Panics_ section in [`VecDeque::drain`].
+    ///
+    /// # Leaking
+    ///
+    /// See the _Leaking_ section in [`VecDeque::drain`].
+    pub fn drain_from(&mut self, index: usize) -> impl Iterator<Item = T> {
+        #[cfg(debug_assertions)]
+        {
+            assert!(
+                !self.state.intersects(State::CLEARED),
+                "cannot drain and push or pop elements in the same clock cycle"
+            );
+            self.state.insert(State::CLEARED);
+        }
+        self.buf.drain(index..)
+    }
 }
 
 impl<T> Sequential for Queue<T> {
@@ -89,12 +151,13 @@ impl<T> Clearable for Queue<T> {
         #[cfg(debug_assertions)]
         {
             assert!(
-                !self.state.intersects(State::PUSHED | State::POPPED),
+                !self.state.intersects(State::CLEARED),
                 "cannot clear queue and push or pop elements in the same clock cycle"
             );
             self.state.insert(State::CLEARED);
         }
-        self.dealloc = self.len;
+        self.buf.clear();
+        debug_assert_eq!(self.dealloc, 0);
     }
 }
 

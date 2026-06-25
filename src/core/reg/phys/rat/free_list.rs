@@ -1,4 +1,4 @@
-use super::{RegIdx, RenameLock};
+use super::{Mapping, RegIdx, RenameLock};
 use crate::core::reg::{ArchReg, phys::HARDWIRED_IDX};
 use crate::seq::Sequential;
 use generic_array::GenericArray;
@@ -8,6 +8,7 @@ use std::collections::VecDeque;
 //#region FreeList
 
 pub(super) type Queue = VecDeque<RegIdx>;
+const FIRST_IDX: usize = 0;
 
 #[derive(Debug, Clone)]
 pub struct FreeList {
@@ -18,7 +19,6 @@ pub struct FreeList {
 
 impl FreeList {
     pub fn new<T: ArchReg>(prf_size: usize, mapping: &mut GenericArray<RegIdx, T::COUNT>) -> Self {
-        const FIRST_IDX: usize = 0;
         let mut queue = (FIRST_IDX..prf_size).collect::<Queue>();
         for (i, reg) in T::iter().enumerate() {
             if !reg.is_hardwired() {
@@ -30,9 +30,13 @@ impl FreeList {
 
                 // The hardwired should never be able to be allocated
                 const_assert_eq!(HARDWIRED_IDX, FIRST_IDX);
-                queue.pop_front_if(|idx| *idx == HARDWIRED_IDX);
+                assert!(
+                    queue.pop_front_if(|idx| *idx == HARDWIRED_IDX).is_some(),
+                    "not enough physical registers to accommodate for a hardwired register"
+                );
             }
         }
+
         Self {
             queue,
             #[cfg(debug_assertions)]
@@ -50,6 +54,40 @@ impl FreeList {
         self.queue.append(&mut deallocated);
         #[cfg(debug_assertions)]
         self.state.insert(super::State::COMMITTED);
+    }
+
+    pub(super) fn reset_from_mapping<T: ArchReg>(
+        &mut self,
+        mapping: &Mapping<RegIdx, T>,
+        prf_size: usize,
+    ) {
+        #[cfg(debug_assertions)]
+        {
+            assert!(
+                !self.state.intersects(super::State::FLUSHED),
+                "cannot flush and rename or commit in the same clock cycle"
+            );
+            self.state.insert(super::State::FLUSHED);
+        }
+
+        let any_hardwired = T::iter().any(|reg| reg.is_hardwired());
+        let mapping = {
+            let mut sorted = *mapping;
+            sorted.sort();
+            sorted
+        };
+
+        let mut i = 0;
+        self.queue = (FIRST_IDX..prf_size)
+            .filter(|idx| match mapping.get(i) {
+                Some(mapped) if *mapped == *idx => {
+                    i += 1;
+                    false
+                }
+                _ if *idx == HARDWIRED_IDX && any_hardwired => false,
+                None | Some(_) => true,
+            })
+            .collect::<Queue>();
     }
 }
 

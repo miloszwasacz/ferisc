@@ -10,7 +10,7 @@ use crate::core::{
     },
 };
 use crate::seq::{
-    Queue,
+    Clearable, Queue, Sequential,
     locks::{LockCompose, StageLock},
 };
 
@@ -26,6 +26,7 @@ pub struct DecodeUnit<D = DefaultDecoder> {
     out_queue: Queue<Uop>,
     //TODO Different IN and OUT widths
     width: usize,
+    flushed: bool,
 }
 
 impl<D: Decoder> DecodeUnit<D> {
@@ -41,6 +42,7 @@ impl<D: Decoder> DecodeUnit<D> {
             decoders: dec.into_boxed_slice(),
             out_queue: Queue::new(queue_size),
             width,
+            flushed: false,
         }
     }
 
@@ -58,6 +60,24 @@ impl<D: Decoder> DecodeUnit<D> {
 
     pub fn lock(&mut self) -> impl StageLock<'_, (), &Uop> {
         self.out_queue.pop(self.width)
+    }
+}
+
+impl<D> Sequential for DecodeUnit<D> {
+    fn finish_cycle(&mut self) {
+        self.out_queue.finish_cycle();
+        if self.flushed {
+            self.flushed = false;
+            self.out_queue.clear();
+            self.out_queue.finish_cycle();
+        }
+    }
+}
+
+impl<D> Clearable for DecodeUnit<D> {
+    fn clear(&mut self) {
+        debug_assert!(!self.flushed, "cannot flush more than once per clock cycle");
+        self.flushed = true;
     }
 }
 

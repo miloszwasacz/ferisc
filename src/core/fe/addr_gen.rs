@@ -1,6 +1,6 @@
-use crate::core::FlushInfo;
 use crate::mem::Addr;
 use crate::seq::{Buf, Sequential};
+use bitflags::bitflags;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -20,6 +20,7 @@ impl AddrGen {
         AddrGenLock(Rc::new(RefCell::new(AddrGenLockImpl {
             addr_gen: self,
             mux: Mux::None,
+            target: Default::default(),
             #[cfg(debug_assertions)]
             applied: false,
         })))
@@ -33,11 +34,15 @@ impl Sequential for AddrGen {
 }
 
 // Addr gen needs info from:
-// - commit -> mispredictions
+// - interrupts
+// - commit -> exceptions
+// - execute -> mispredictions
 // - decode -> wrong target from BTB or BP vs BTB mismatch
 // - BP     -> branch
 // - BTB    -> jump target if known _taken_ branch
 // - fetch  -> last fully processed PC (including stalling because of memory)
+
+//#region Lock
 
 #[derive(Debug, Clone)]
 pub struct AddrGenLock<'a>(Rc<RefCell<AddrGenLockImpl<'a>>>);
@@ -46,8 +51,17 @@ pub struct AddrGenLock<'a>(Rc<RefCell<AddrGenLockImpl<'a>>>);
 struct AddrGenLockImpl<'a> {
     addr_gen: &'a mut AddrGen,
     mux: Mux,
+    target: Addr,
     #[cfg(debug_assertions)]
     applied: bool,
+}
+
+macro_rules! add_input {
+    ($addr_gen:expr, $mux:ident, $pc:expr) => {{
+        let mut addr_gen = $addr_gen.0.borrow_mut();
+        let AddrGenLockImpl { mux, target, .. } = &mut *addr_gen;
+        mux.add_input(Mux::$mux, target, $pc);
+    }};
 }
 
 impl<'a> AddrGenLock<'a> {
@@ -56,54 +70,51 @@ impl<'a> AddrGenLock<'a> {
     }
 
     pub fn fetch(&mut self, processed_pc: Addr) {
-        self.0.borrow_mut().mux.add_input(Mux::Fetch(processed_pc));
+        add_input!(self, Fetch, processed_pc);
     }
 
     pub fn btb(&mut self, target: Addr) {
-        self.0.borrow_mut().mux.add_input(Mux::Btb(target));
+        add_input!(self, Btb, target);
     }
 
     pub fn bp(&mut self, new_pc: Addr) {
-        self.0.borrow_mut().mux.add_input(Mux::Bp(new_pc));
+        add_input!(self, Bp, new_pc);
     }
 
     pub fn decode(&mut self, jump_target: Addr) {
-        self.0.borrow_mut().mux.add_input(Mux::Decode(jump_target));
+        add_input!(self, Decode, jump_target);
     }
 
     pub fn execute(&mut self, jump_target: Addr) {
-        self.0.borrow_mut().mux.add_input(Mux::Execute(jump_target));
+        add_input!(self, Execute, jump_target);
     }
 
-    pub fn exception(&mut self, next_pc: Addr) {
-        self.0.borrow_mut().mux.add_input(Mux::Exception(next_pc));
+    pub fn commit(&mut self, next_pc: Addr) {
+        add_input!(self, Commit, next_pc);
     }
 
-    pub fn apply(self) -> FlushInfo {
+    pub fn apply(self) -> FeFlush {
         let mut lock = self.0.borrow_mut();
-        let next_pc = match lock.mux {
-            Mux::Fetch(pc)
-            | Mux::Btb(pc)
-            | Mux::Bp(pc)
-            | Mux::Decode(pc)
-            | Mux::Execute(pc)
-            | Mux::Exception(pc) => pc,
-            Mux::None => panic!("at least one input must be supplied to the multiplexer"),
-        };
-        lock.addr_gen.next_pc.write(next_pc);
+
+        assert!(
+            lock.mux > Mux::None,
+            "at least one input must be supplied to the multiplexer"
+        );
+        let target = lock.target;
+        lock.addr_gen.next_pc.write(target);
         #[cfg(debug_assertions)]
         {
             lock.applied = true;
         }
 
-        match lock.mux {
-            Mux::Fetch(_) | Mux::Btb(_) => FlushInfo::None,
-            Mux::Bp(_) => FlushInfo::Fetch,
-            Mux::Decode(_) => FlushInfo::Decode,
-            Mux::Execute(_) => FlushInfo::Execute,
-            Mux::Exception(_) => FlushInfo::Exception,
-            Mux::None => unreachable!(),
+        let mut flush = FeFlush(FlushInfo::empty());
+        if lock.mux > Mux::Fetch {
+            flush.0.insert(FlushInfo::FETCH);
         }
+        if lock.mux > Mux::Decode {
+            flush.0.insert(FlushInfo::DECODE);
+        }
+        flush
     }
 }
 
@@ -118,23 +129,51 @@ impl Drop for AddrGenLockImpl<'_> {
 enum Mux {
     #[default]
     None,
-    Fetch(Addr),
-    Btb(Addr),
-    Bp(Addr),
-    Decode(Addr),
-    Execute(Addr),
-    Exception(Addr),
+    Fetch,
+    Btb,
+    Bp,
+    Decode,
+    Execute,
+    Commit,
     //TODO Interrupts
 }
 
 impl Mux {
-    fn add_input(&mut self, input: Self) {
+    fn add_input(&mut self, input: Self, target: &mut Addr, pc: Addr) {
         debug_assert_ne!(
             *self, input,
             "cannot add input from the same stage more than once"
         );
         if *self < input {
-            *self = input
+            *self = input;
+            *target = pc;
         }
     }
 }
+
+//#endregion
+
+//#region Flush info
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct FeFlush(FlushInfo);
+
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    struct FlushInfo: u8 {
+        const FETCH = 1 << 0;
+        const DECODE = 1 << 1;
+    }
+}
+
+impl FeFlush {
+    pub fn flush_fetch(&self) -> bool {
+        self.0.contains(FlushInfo::FETCH)
+    }
+
+    pub fn flush_decode(&self) -> bool {
+        self.0.contains(FlushInfo::DECODE)
+    }
+}
+
+//#endregion

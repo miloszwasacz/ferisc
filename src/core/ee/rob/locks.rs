@@ -1,4 +1,4 @@
-use super::{EntryHandle, Flush, FlushPriority, Rob, Slot, UopKind};
+use super::{EntryHandle, Flush, FlushPriority, FlushedUop, Rob, Slot, UopKind};
 use crate::core::{
     Mode,
     csr::{CsrAddr, CsrFile},
@@ -8,24 +8,63 @@ use crate::core::{
 };
 use crate::mem::Addr;
 use crate::seq::{
-    Buf, Pbuf,
+    Buf, Clearable, Pbuf,
     locks::{
-        CircuitLock, Transformer,
+        CircuitLock, StageLock, Transformer,
         queue::{PopLock, PopTrans, PushLock, PushTrans},
     },
 };
 use std::cell::RefCell;
 use std::debug_assert_matches;
+use std::iter::Rev;
 use std::marker::PhantomData;
 use std::rc::Rc;
+
+//#region Access
+
+pub struct AccessLock<'r>(&'r mut Rob);
+
+impl<'r> AccessLock<'r> {
+    pub(super) fn new(rob: &'r mut Rob) -> Self {
+        Self(rob)
+    }
+
+    pub fn dispatch<'a>(&'a mut self) -> impl StageLock<'a, rename::Uop, (rename::Uop, EntryHandle)>
+    where
+        'r: 'a,
+    {
+        DispatchLock::new(self)
+    }
+
+    pub fn execute<'a, 'g>(&'a mut self, addr_gen: AddrGenLock<'g>) -> ExecuteLock<'a, 'r, 'g>
+    where
+        'r: 'a,
+    {
+        ExecuteLock::new(self, addr_gen)
+    }
+
+    pub fn commit<'a>(
+        &'a mut self,
+        csrf: &mut CsrFile,
+        addr_gen: AddrGenLock<'_>,
+        mode: &mut Buf<Mode>,
+    ) -> impl StageLock<'a, (), Option<Dest>>
+    where
+        'r: 'a,
+    {
+        CommitLock::new(self, csrf, addr_gen, mode)
+    }
+}
+
+//#endregion
 
 //#region Dispatch
 
 pub struct DispatchLock<'a>(PushLock<'a, Slot>);
 
-impl<'a> DispatchLock<'a> {
-    pub(super) fn new(rob: &'a mut Rob) -> Self {
-        Self(rob.queue.push())
+impl<'a, 'r: 'a> DispatchLock<'a> {
+    fn new(rob: &'a mut AccessLock<'r>) -> Self {
+        Self(rob.0.queue.push())
     }
 }
 
@@ -59,14 +98,14 @@ impl<'a> Transformer<'a> for DispatchTrans {
 
 //#region Execute
 
-pub struct ExecuteLock<'r, 'g> {
-    rob: &'r mut Rob,
+pub struct ExecuteLock<'a, 'r, 'g> {
+    rob: &'a mut AccessLock<'r>,
     addr_gen: AddrGenLock<'g>,
     cause: Option<(Addr, usize)>,
 }
 
-impl<'r, 'g> ExecuteLock<'r, 'g> {
-    pub(super) fn new(rob: &'r mut Rob, addr_gen: AddrGenLock<'g>) -> Self {
+impl<'a, 'r: 'a, 'g> ExecuteLock<'a, 'r, 'g> {
+    fn new(rob: &'a mut AccessLock<'r>, addr_gen: AddrGenLock<'g>) -> Self {
         Self {
             rob,
             addr_gen,
@@ -78,6 +117,7 @@ impl<'r, 'g> ExecuteLock<'r, 'g> {
         // Save only the index of the earliest possible cause
         self.cause = self
             .rob
+            .0
             .queue
             .iter()
             .enumerate()
@@ -95,11 +135,12 @@ impl<'r, 'g> ExecuteLock<'r, 'g> {
     }
 }
 
-impl Drop for ExecuteLock<'_, '_> {
+impl Drop for ExecuteLock<'_, '_, '_> {
     fn drop(&mut self) {
         if let Some((target, cause)) = self.cause {
             self.addr_gen.execute(target);
             self.rob
+                .0
                 .flush
                 .write(Flush::After(cause), FlushPriority::Execute);
             //TODO Notify BP
@@ -132,19 +173,19 @@ pub struct CommitLock<'r, 'c, 'g, 'm> {
     special: Special,
 }
 
-impl<'r, 'c, 'g, 'm> CommitLock<'r, 'c, 'g, 'm> {
-    pub(super) fn new(
-        rob: &'r mut Rob,
+impl<'a, 'r: 'a, 'c, 'g, 'm> CommitLock<'a, 'c, 'g, 'm> {
+    fn new(
+        rob: &'a mut AccessLock<'r>,
         csrf: &'c mut CsrFile,
         addr_gen: AddrGenLock<'g>,
         mode: &'m mut Buf<Mode>,
     ) -> Self {
         Self {
-            pop: rob.queue.pop(rob.commit_width),
+            pop: rob.0.queue.pop(rob.0.commit_width),
             csrf,
             addr_gen,
             mode,
-            flush: &mut rob.flush,
+            flush: &mut rob.0.flush,
             count: 0,
             special: Default::default(),
         }
@@ -159,21 +200,21 @@ impl Drop for CommitLock<'_, '_, '_, '_> {
                 self.csrf.commit(csr);
                 self.count
             }
-            Special::Exception { ex, pc } => {
+            Special::Exception { ex: _, pc: _ } => {
                 debug_assert_matches!(
                     self.flush.read(),
                     Flush::None,
                     "cannot commit and flush in the same clock cycle"
                 );
                 todo!("trap handling");
-                self.csrf.mcause.implicit_write(ex.into());
-                self.csrf.mepc.implicit_write(pc.into());
-
-                //TODO Check ISA if this privilege elevation is correct
-                self.mode.write(Mode::M);
-                self.flush.write(Flush::All, FlushPriority::Commit);
-
-                self.count - 1
+                // self.csrf.mcause.implicit_write(ex.into());
+                // self.csrf.mepc.implicit_write(pc.into());
+                //
+                // //TODO Check ISA if this privilege elevation is correct
+                // self.mode.write(Mode::M);
+                // self.flush.write(Flush::All, FlushPriority::Commit);
+                //
+                // self.count - 1
             }
         };
         self.csrf
@@ -246,6 +287,85 @@ impl<'r, 'c, 'g, 'm> Transformer<'r> for CommitTrans<'r, 'c, 'g, 'm> {
         lock.count += 1;
         debug_assert_matches!(lock.special, Special::None);
         lock.special = special;
+    }
+}
+
+//#endregion
+
+//#region Flush
+
+pub struct FlushLock<'r>(
+    Rev<std::vec::IntoIter<FlushedUop>>,
+    PhantomData<&'r mut Rob>,
+);
+
+impl<'a> FlushLock<'a> {
+    pub(super) fn new(rob: &'a mut Rob, after: usize) -> Self {
+        let from = (after + 1).max(rob.queue.len() - rob.flush_width);
+        if from == after + 1 {
+            rob.flush.clear();
+        }
+        let flushed = rob
+            .queue
+            .drain_from(from)
+            .map(|slot| {
+                let flushed = {
+                    let entry = slot.borrow();
+                    FlushedUop {
+                        kind: entry.kind.read_copied(),
+                        addr: entry.addr,
+                        comp: entry.comp,
+                    }
+                };
+                {
+                    let check = Rc::downgrade(&slot);
+                    drop(slot);
+                    #[cfg(debug_assertions)]
+                    if let Some(slot) = check.upgrade() {
+                        panic!(
+                            "ROB slot was not flushed properly (slot strong ref count: {})",
+                            Rc::strong_count(&slot) - 1
+                        );
+                    }
+                }
+                flushed
+            })
+            .collect::<Box<[_]>>();
+
+        Self(flushed.into_iter().rev(), PhantomData)
+    }
+}
+
+impl<'a> CircuitLock<'a> for FlushLock<'a> {
+    type Trans = FlushTrans;
+
+    fn make_trans(&mut self) -> Self::Trans {
+        FlushTrans(self.0.next())
+    }
+}
+
+pub struct FlushTrans(Option<FlushedUop>);
+
+impl<'a> Transformer<'a> for FlushTrans {
+    type In = ();
+    type Out = FlushedUop;
+    type Lock = FlushLock<'a>;
+
+    fn transform(&mut self, _: &Self::Lock, _: Self::In) -> Option<Self::Out> {
+        self.0.take()
+    }
+
+    fn commit(self, _: &mut Self::Lock) {}
+}
+
+pub struct FlushAllLock<'a>(PhantomData<&'a mut Rob>);
+
+impl<'a> FlushAllLock<'a> {
+    pub(super) fn new(rob: &'a mut Rob) -> Self {
+        rob.flush.clear();
+        rob.queue.clear();
+
+        Self(PhantomData)
     }
 }
 

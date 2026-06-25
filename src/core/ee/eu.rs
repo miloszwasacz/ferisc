@@ -8,12 +8,12 @@ use crate::core::{
     reg::phys::Prf,
     uop::execute::{Execute, Latency, Uop, WriteReg},
 };
-use crate::seq::{Buf, Sequential, locks::StageLock};
+use crate::seq::{Buf, Clearable, Sequential, locks::StageLock};
 
 mod lock;
 
 //TODO Pipelined EU
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Eu<U> {
     uop: Option<Uop<U>>,
     new: Option<Uop<U>>,
@@ -25,7 +25,7 @@ pub struct Eu<U> {
 impl<U: Execute> Eu<U> {
     pub fn issue(
         &mut self,
-        rob_lock: &mut ExecuteLock<'_, '_>,
+        rob_lock: &mut ExecuteLock<'_, '_, '_>,
         write_reg: impl WriteReg<U::Reg>,
         csrf: &mut CsrFile,
     ) -> impl StageLock<'_, Uop<U>, ()> {
@@ -40,7 +40,7 @@ impl<U: Execute> Eu<U> {
 
     pub fn tick(
         &mut self,
-        rob_lock: &mut ExecuteLock<'_, '_>,
+        rob_lock: &mut ExecuteLock<'_, '_, '_>,
         prf: &mut Prf<U::Reg>,
         csrf: &mut CsrFile,
     ) -> Bypass<U::Reg> {
@@ -73,6 +73,41 @@ impl<U: Execute> Eu<U> {
         }
         bypass.build()
     }
+
+    //TODO Document how `flush` is different from `clear` (i.e. flush vs flush all)
+    pub fn flush(&mut self) {
+        #[cfg(debug_assertions)]
+        {
+            assert!(
+                self.state.intersects(State::CLEARED),
+                "cannot flush and issue or execute in the same clock cycle"
+            );
+            self.state.insert(State::CLEARED);
+        }
+        debug_assert!(self.new.is_none());
+
+        match self.uop.as_ref() {
+            None => debug_assert_eq!(self.cycles.read_copied(), Default::default()),
+            Some(uop) => {
+                if uop.rob_entry.is_flushed() {
+                    self.uop = None;
+                    self.cycles.clear();
+                }
+            }
+        }
+    }
+}
+
+impl<U> Default for Eu<U> {
+    fn default() -> Self {
+        Self {
+            uop: None,
+            new: None,
+            cycles: Default::default(),
+            #[cfg(debug_assertions)]
+            state: Default::default(),
+        }
+    }
 }
 
 impl<U> Sequential for Eu<U> {
@@ -91,11 +126,32 @@ impl<U> Sequential for Eu<U> {
     }
 }
 
+impl<U> Clearable for Eu<U> {
+    fn clear(&mut self) {
+        #[cfg(debug_assertions)]
+        {
+            assert!(
+                self.state.intersects(State::CLEARED),
+                "cannot flush and issue or execute in the same clock cycle"
+            );
+            self.state.insert(State::CLEARED);
+        }
+        debug_assert!(self.new.is_none());
+
+        *self = Self {
+            #[cfg(debug_assertions)]
+            state: self.state,
+            ..Default::default()
+        };
+    }
+}
+
 #[cfg(debug_assertions)]
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, Default)]
     struct State: u8 {
         const ISSUED = 1 << 0;
         const EXECUTED = 1 << 1;
+        const CLEARED = 1 << 2 | Self::ISSUED.bits() | Self::EXECUTED.bits();
     }
 }

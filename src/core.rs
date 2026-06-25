@@ -1,5 +1,8 @@
 use self::csr::CsrFile;
-use self::ee::{pipeline::Pipelines, rob::Rob};
+use self::ee::{
+    pipeline::Pipelines,
+    rob::{Rob, RobAccess},
+};
 use self::fe::{AddrGen, decode::DecodeUnit, fetch::FetchUnit, predecode::Predecoder};
 use self::mem::{DirectHierarchy, MemSubsystem};
 use crate::seq::{Buf, Clearable, IntoPipelineStage, PipelineStage, Sequential};
@@ -45,60 +48,59 @@ impl Core {
                 .execute();
         }
 
-        // Rename/Dispatch
-        let (rename, dispatch) = self.pipelines.input_locks();
-        self.decode
-            .lock()
-            .into_pipeline_stage()
-            .copied()
-            .substage(rename)
-            .substage(self.rob.dispatch())
-            .substage(self.mem.dispatch())
-            .substage(dispatch)
-            .execute();
+        match self.rob.access() {
+            RobAccess::Ok(mut rob) => {
+                // Rename/Dispatch
+                let (rename, dispatch) = self.pipelines.input_locks();
+                self.decode
+                    .lock()
+                    .into_pipeline_stage()
+                    .copied()
+                    .substage(rename)
+                    .substage(rob.dispatch())
+                    .substage(self.mem.dispatch())
+                    .substage(dispatch)
+                    .execute();
 
-        // Issue & Execute
-        self.pipelines
-            .tick(&mut self.rob, &mut self.csrf, addr_gen.clone());
+                // Issue & Execute
+                self.pipelines
+                    .tick(&mut rob, &mut self.csrf, addr_gen.clone());
 
-        // Commit
-        self.rob
-            .commit(&mut self.csrf, addr_gen.clone(), &mut self.mode)
-            .into_pipeline_stage()
-            .substage(self.pipelines.commit())
-            .execute();
+                // // Memory Access
+                // self.mem_unit.tick();
+
+                // Commit
+                rob.commit(&mut self.csrf, addr_gen.clone(), &mut self.mode)
+                    .into_pipeline_stage()
+                    .substage(self.pipelines.commit())
+                    .execute();
+            }
+            RobAccess::FlushSome(flush) => {
+                flush
+                    .into_pipeline_stage()
+                    .substage(self.pipelines.flush())
+                    //TODO Flush memory subsystem
+                    .transform(|_| ())
+                    .execute();
+            }
+            RobAccess::FlushAll(_) => {
+                self.pipelines.clear();
+                //TODO Flush memory subsystem
+            }
+        }
 
         let cycle = self.csrf.mcycle.read();
         self.csrf.mcycle.implicit_write(cycle + 1);
 
         // Flush
         //TODO How to update BTB and BP when flushing?
-        let mut flush_fetch = |mem: &mut MemSubsystem<DirectHierarchy>| {
-            self.fetch.clear(mem.imem().deref_mut());
+        let flush = addr_gen.apply();
+        if flush.flush_fetch() {
+            self.fetch.clear(self.mem.imem().deref_mut());
             self.predecode.clear();
-        };
-        let flush_decode = || {
-            todo!("flush decode");
-        };
-        match addr_gen.apply() {
-            FlushInfo::None => {}
-            FlushInfo::Fetch => {
-                flush_fetch(&mut self.mem);
-            }
-            FlushInfo::Decode => {
-                flush_fetch(&mut self.mem);
-                flush_decode();
-            }
-            FlushInfo::Execute => {
-                flush_fetch(&mut self.mem);
-                flush_decode();
-                todo!("flush the rest of the pipeline (only up to causing branch)");
-            }
-            FlushInfo::Exception => {
-                flush_fetch(&mut self.mem);
-                flush_decode();
-                todo!("flush the rest of the pipeline on exception");
-            }
+        }
+        if flush.flush_decode() {
+            self.decode.clear();
         }
 
         self.finish_cycle();
@@ -124,14 +126,4 @@ pub enum Mode {
     /// Machine mode
     #[default]
     M,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum FlushInfo {
-    #[default]
-    None,
-    Fetch,
-    Decode,
-    Execute,
-    Exception,
 }

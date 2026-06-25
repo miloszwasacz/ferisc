@@ -7,21 +7,21 @@ use crate::core::{
 use crate::seq::locks::{CircuitLock, Transformer};
 use std::marker::PhantomData;
 
-pub struct Lock<'e, 'l, 'r, 'g, 'c, U: Execute, W> {
+pub struct Lock<'e, 'l, 'a, 'r, 'g, 'c, U: Execute, W> {
     eu: &'e mut Eu<U>,
-    rob_lock: &'l mut rob::locks::ExecuteLock<'r, 'g>,
+    rob_lock: &'l mut rob::locks::ExecuteLock<'a, 'r, 'g>,
     write_reg: W,
     csrf: &'c mut CsrFile,
 }
 
-impl<'e, 'l, 'r, 'g, 'c, U, W> Lock<'e, 'l, 'r, 'g, 'c, U, W>
+impl<'e, 'l, 'a, 'r, 'g, 'c, U, W> Lock<'e, 'l, 'a, 'r, 'g, 'c, U, W>
 where
     U: Execute,
     W: WriteReg<U::Reg>,
 {
     pub(super) fn new(
         eu: &'e mut Eu<U>,
-        rob_lock: &'l mut rob::locks::ExecuteLock<'r, 'g>,
+        rob_lock: &'l mut rob::locks::ExecuteLock<'a, 'r, 'g>,
         write_reg: W,
         csrf: &'c mut CsrFile,
     ) -> Self {
@@ -34,31 +34,31 @@ where
     }
 }
 
-impl<'e, 'l, 'r, 'g, 'c, U, W> CircuitLock<'e> for Lock<'e, 'l, 'r, 'g, 'c, U, W>
+impl<'e, 'l, 'a, 'r, 'g, 'c, U, W> CircuitLock<'e> for Lock<'e, 'l, 'a, 'r, 'g, 'c, U, W>
 where
     U: Execute + 'e,
     W: WriteReg<U::Reg>,
 {
-    type Trans = Trans<'e, 'l, 'r, 'g, 'c, U, W>;
+    type Trans = Trans<'e, 'l, 'a, 'r, 'g, 'c, U, W>;
 
     fn make_trans(&mut self) -> Self::Trans {
         Trans(None, PhantomData)
     }
 }
 
-pub struct Trans<'e, 'l, 'r, 'g, 'c, U: Execute, W>(
+pub struct Trans<'e, 'l, 'a, 'r, 'g, 'c, U: Execute, W>(
     Option<Uop<U>>,
-    PhantomData<Lock<'e, 'l, 'r, 'g, 'c, U, W>>,
+    PhantomData<Lock<'e, 'l, 'a, 'r, 'g, 'c, U, W>>,
 );
 
-impl<'e, 'l, 'r, 'g, 'c, U, W> Transformer<'e> for Trans<'e, 'l, 'r, 'g, 'c, U, W>
+impl<'e, 'l, 'a, 'r, 'g, 'c, U, W> Transformer<'e> for Trans<'e, 'l, 'a, 'r, 'g, 'c, U, W>
 where
     U: Execute + 'e,
     W: WriteReg<U::Reg>,
 {
     type In = Uop<U>;
     type Out = ();
-    type Lock = Lock<'e, 'l, 'r, 'g, 'c, U, W>;
+    type Lock = Lock<'e, 'l, 'a, 'r, 'g, 'c, U, W>;
 
     fn transform(&mut self, lock: &Self::Lock, input: Self::In) -> Option<Self::Out> {
         if lock.eu.cycles.read_copied() > 0 || lock.eu.new.is_some() {

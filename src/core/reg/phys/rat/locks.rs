@@ -12,7 +12,6 @@ use crate::core::{
 };
 use crate::seq::locks::{CircuitLock, Transformer};
 use std::collections::VecDeque;
-use std::marker::PhantomData;
 
 //#region Rename
 
@@ -94,7 +93,7 @@ where
                 #[cfg(debug_assertions)]
                 id: lock.rat.id,
                 idx: lock.mapping[reg],
-                _arch: PhantomData,
+                arch: reg,
             },
             |reg, value| {
                 if reg.is_hardwired() {
@@ -103,9 +102,8 @@ where
                             #[cfg(debug_assertions)]
                             id: lock.rat.id,
                             idx: HARDWIRED_IDX,
-                            _arch: PhantomData,
+                            arch: reg,
                         },
-                        arch: reg,
                         prev: HARDWIRED_IDX,
                     });
                 }
@@ -117,9 +115,8 @@ where
                             #[cfg(debug_assertions)]
                             id: lock.rat.id,
                             idx,
-                            _arch: PhantomData,
+                            arch: reg,
                         },
-                        arch: reg,
                         prev: lock.mapping[reg],
                     })
                     .inspect(|dest| self.allocated.push((dest.arch, dest.idx, value)))
@@ -208,6 +205,71 @@ impl<'a, T: ArchReg + 'a> Transformer<'a> for CommitTrans<T> {
         if !dest.arch.is_hardwired() {
             lock.mapping[dest.arch] = dest.idx;
             lock.deallocated.push_back(dest.prev);
+        }
+    }
+}
+
+//#endregion
+
+//#region Flush
+
+pub struct FlushLock<'a, T: ArchReg> {
+    prf: &'a mut Prf<T>,
+    rat: &'a mut Rat<T>,
+    mapping: Mapping<RegIdx, T>,
+    deallocated: VecDeque<RegIdx>,
+}
+
+impl<'a, T: ArchReg> FlushLock<'a, T> {
+    pub(super) fn new(prf: &'a mut Prf<T>, rat: &'a mut Rat<T>) -> Self {
+        let mapping = rat.mapping.read_copied();
+        Self {
+            prf,
+            rat,
+            mapping,
+            deallocated: VecDeque::new(),
+        }
+    }
+}
+
+impl<'a, T: ArchReg> CircuitLock<'a> for FlushLock<'a, T> {
+    type Trans = FlushTrans<T>;
+
+    fn make_trans(&mut self) -> Self::Trans {
+        FlushTrans(None)
+    }
+}
+
+impl<T: ArchReg> Drop for FlushLock<'_, T> {
+    fn drop(&mut self) {
+        self.rat.mapping.write(self.mapping);
+        self.rat
+            .free_list
+            .deallocate(std::mem::take(&mut self.deallocated));
+
+        #[cfg(debug_assertions)]
+        self.rat.state.insert(State::FLUSHED);
+    }
+}
+
+pub struct FlushTrans<T: ArchReg>(Option<RegDest<T>>);
+
+impl<'a, T: ArchReg + 'a> Transformer<'a> for FlushTrans<T> {
+    type In = RegDest<T>;
+    type Out = ();
+    type Lock = FlushLock<'a, T>;
+
+    fn transform(&mut self, _: &Self::Lock, input: Self::In) -> Option<Self::Out> {
+        let old = self.0.replace(input);
+        debug_assert!(old.is_none());
+        Some(())
+    }
+
+    fn commit(self, lock: &mut Self::Lock) {
+        let dest = self.0.unwrap();
+        if !dest.arch.is_hardwired() {
+            lock.mapping[dest.arch] = dest.prev;
+            lock.deallocated.push_back(dest.idx)
         }
     }
 }

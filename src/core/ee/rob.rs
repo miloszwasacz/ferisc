@@ -1,13 +1,9 @@
 use self::entry::{Entry, UopKind};
 use self::flush::{Flush, FlushPriority};
-use self::locks::{CommitLock, DispatchLock, ExecuteLock};
-use crate::core::{
-    Mode,
-    csr::CsrFile,
-    fe::AddrGenLock,
-    uop::{Exception, commit::Dest, rename},
-};
-use crate::seq::{Buf, Pbuf, Queue, locks::StageLock};
+pub use self::flush::{Uop as FlushedUop, UopKind as FlushedUopKind};
+use self::locks::{AccessLock, FlushAllLock, FlushLock};
+use crate::core::uop::Exception;
+use crate::seq::{Pbuf, Queue};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
@@ -22,25 +18,23 @@ pub struct Rob {
     queue: Queue<Slot>,
     flush: Pbuf<Flush, FlushPriority>,
     commit_width: usize,
+    flush_width: usize,
 }
 
 impl Rob {
-    pub fn dispatch(&mut self) -> impl StageLock<'_, rename::Uop, (rename::Uop, EntryHandle)> {
-        DispatchLock::new(self)
+    pub fn access(&mut self) -> RobAccess<'_> {
+        match self.flush.read_copied() {
+            Flush::None => RobAccess::Ok(AccessLock::new(self)),
+            Flush::After(i) => RobAccess::FlushSome(FlushLock::new(self, i)),
+            Flush::All => RobAccess::FlushAll(FlushAllLock::new(self)),
+        }
     }
+}
 
-    pub fn execute<'r, 'g>(&'r mut self, addr_gen: AddrGenLock<'g>) -> ExecuteLock<'r, 'g> {
-        ExecuteLock::new(self, addr_gen)
-    }
-
-    pub fn commit(
-        &mut self,
-        csrf: &mut CsrFile,
-        addr_gen: AddrGenLock<'_>,
-        mode: &mut Buf<Mode>,
-    ) -> impl StageLock<'_, (), Option<Dest>> {
-        CommitLock::new(self, csrf, addr_gen, mode)
-    }
+pub enum RobAccess<'a> {
+    Ok(AccessLock<'a>),
+    FlushSome(FlushLock<'a>),
+    FlushAll(FlushAllLock<'a>),
 }
 
 #[derive(Debug, Clone)]
@@ -56,11 +50,7 @@ macro_rules! with_entry {
 }
 
 impl EntryHandle {
-    pub fn commited(&self) -> bool {
-        self.0.upgrade().is_none()
-    }
-
-    pub fn flushed(&self) -> bool {
+    pub fn is_flushed(&self) -> bool {
         self.0.upgrade().is_none()
     }
 

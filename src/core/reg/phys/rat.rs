@@ -1,5 +1,5 @@
 use self::free_list::FreeList;
-use self::locks::{CommitLock, RenameLock};
+use self::locks::{CommitLock, FlushLock, RenameLock};
 use super::{Prf, RegIdx};
 use crate::core::reg::ArchReg;
 use crate::seq::{Buf, Sequential};
@@ -72,11 +72,42 @@ impl<T: ArchReg> Rat<T> {
         }
         CommitLock::new(prf, self)
     }
+
+    pub fn flush<'a>(&'a mut self, prf: &'a mut Prf<T>) -> FlushLock<'a, T> {
+        #[cfg(debug_assertions)]
+        {
+            assert_eq!(
+                prf.id, self.id,
+                "mismatched PRF and RAT IDs: \
+                renaming should occur between corresponding PRF and RAT"
+            );
+            assert!(
+                !self.state.intersects(State::FLUSHED),
+                "cannot flush and rename or commit in the same clock cycle"
+            );
+        }
+
+        FlushLock::new(prf, self)
+    }
+
+    pub fn flush_all(&mut self, prf_size: usize) {
+        #[cfg(debug_assertions)]
+        {
+            assert!(
+                !self.state.intersects(State::FLUSHED),
+                "cannot flush and rename or commit in the same clock cycle"
+            );
+            self.state.insert(State::FLUSHED);
+        }
+        self.mapping.write(self.committed.read_copied());
+        self.free_list
+            .reset_from_mapping(self.committed.read(), prf_size);
+    }
 }
 
 impl<T: ArchReg> Clone for Rat<T>
 where
-    Mapping<RegIdx, T>: Copy,
+    Mapping<RegIdx, T>: Clone,
 {
     fn clone(&self) -> Self {
         Self {
@@ -104,8 +135,8 @@ impl<T: ArchReg> Sequential for Rat<T> {
     }
 }
 
+#[cfg(debug_assertions)]
 bitflags! {
-    #[allow(unused)]
     #[derive(Debug, Clone, Copy)]
     struct State: u8 {
         const RENAMED = 1 << 0;

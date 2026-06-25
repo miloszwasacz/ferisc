@@ -3,7 +3,6 @@ pub use self::rat::Rat;
 use super::ArchReg;
 use crate::seq::Sequential;
 use std::iter::repeat_with;
-use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut, Index, IndexMut};
 
 mod preg;
@@ -58,6 +57,10 @@ impl<T: ArchReg> Prf<T> {
         };
         (prf, rat)
     }
+
+    pub fn size(&self) -> usize {
+        self.regs.len()
+    }
 }
 
 impl<T: ArchReg> Clone for Prf<T>
@@ -91,14 +94,13 @@ pub struct RegOper<T> {
     #[cfg(debug_assertions)]
     id: usize,
     idx: RegIdx,
-    _arch: PhantomData<T>,
+    arch: T,
 }
 
 /// Physical register destination
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RegDest<T> {
     oper: RegOper<T>,
-    arch: T,
     prev: RegIdx,
 }
 

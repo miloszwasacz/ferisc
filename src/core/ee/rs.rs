@@ -1,7 +1,7 @@
 pub use self::bypass::{Bypass, BypassBuilder};
 use self::locks::{DispatchLock, IssueLock};
 use crate::core::uop::issue::{Issue, TryReadReg, Uop as IUop};
-use crate::seq::{Buf, Sequential};
+use crate::seq::{Buf, Clearable, Sequential};
 use std::collections::VecDeque;
 
 mod bypass;
@@ -40,6 +40,20 @@ impl<U> Rs<U> {
 
         IssueLock::new(self, try_read_reg)
     }
+
+    //TODO Document how `flush` is different from `clear` (i.e. flush vs flush all)
+    pub fn flush(&mut self) {
+        #[cfg(debug_assertions)]
+        {
+            assert!(
+                self.state.intersects(State::CLEARED),
+                "cannot flush and dispatch or issue in the same clock cycle"
+            );
+            self.state.insert(State::CLEARED);
+        }
+
+        self.entries.retain(|uop| !uop.rob_entry.is_flushed());
+    }
 }
 
 impl<U> Sequential for Rs<U> {
@@ -56,11 +70,27 @@ impl<U> Sequential for Rs<U> {
     }
 }
 
+impl<U> Clearable for Rs<U> {
+    fn clear(&mut self) {
+        #[cfg(debug_assertions)]
+        {
+            assert!(
+                self.state.intersects(State::CLEARED),
+                "cannot flush and dispatch or issue in the same clock cycle"
+            );
+            self.state.insert(State::CLEARED);
+        }
+
+        self.entries.clear();
+    }
+}
+
 #[cfg(debug_assertions)]
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     struct State: u8 {
         const DISPATCHED = 1 << 0;
         const ISSUED = 1 << 1;
+        const CLEARED = 1 << 2 | Self::DISPATCHED.bits() | Self::ISSUED.bits();
     }
 }

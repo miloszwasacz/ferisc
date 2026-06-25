@@ -36,7 +36,7 @@ impl Execute for Uop {
     fn execute(
         self,
         mut rob_entry: EntryHandle,
-        lock: &mut ExecuteLock<'_, '_>,
+        lock: &mut ExecuteLock<'_, '_, '_>,
         write_reg: &mut impl WriteReg<Self::Reg>,
         csrf: &mut CsrFile,
     ) {

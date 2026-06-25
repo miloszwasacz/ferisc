@@ -1,7 +1,14 @@
-use super::{DUop, DecUop, IUop, Pipelines, RUop};
+use super::{DUop, DecUop, IUop, Line, Pipeline, Pipelines, RUop};
 use crate::core::{
-    ee::rs,
-    reg::{ArchReg, int::IntReg, phys::rat::locks as rat},
+    ee::{
+        rob::{FlushedUop as FUop, FlushedUopKind as FKind},
+        rs,
+    },
+    reg::{
+        ArchReg,
+        int::IntReg,
+        phys::{RegDest, rat::locks as rat},
+    },
     uop::{
         InferUop,
         commit::Dest,
@@ -47,6 +54,10 @@ impl Pipelines {
 
     pub fn commit(&mut self) -> CommitLock<'_> {
         CommitLock::new(self)
+    }
+
+    pub fn flush(&mut self) -> FlushLock<'_> {
+        FlushLock::new(self)
     }
 }
 
@@ -319,6 +330,155 @@ impl<'a> Transformer<'a> for CommitTrans {
 
     fn commit(self, lock: &mut Self::Lock) {
         commit_trans!(self, lock);
+    }
+}
+
+//#endregion
+
+//#region Flush
+
+pub struct FlushLock<'a> {
+    int: PipelineFlushLock<'a, IntReg>,
+}
+
+impl<'a> FlushLock<'a> {
+    pub(super) fn new(pipelines: &'a mut Pipelines) -> Self {
+        let Pipelines { int } = pipelines;
+
+        Self {
+            int: PipelineFlushLock::new(int),
+        }
+    }
+}
+
+impl<'a> CircuitLock<'a> for FlushLock<'a> {
+    type Trans = FlushTrans;
+
+    fn make_trans(&mut self) -> Self::Trans {
+        FlushTrans(None)
+    }
+}
+
+pub struct FlushTrans(Option<Dest>);
+
+impl<'a> Transformer<'a> for FlushTrans {
+    type In = FUop;
+    type Out = FUop;
+    type Lock = FlushLock<'a>;
+
+    fn transform(&mut self, _: &Self::Lock, input: Self::In) -> Option<Self::Out> {
+        debug_assert!(self.0.is_none());
+        self.0 = match input.kind {
+            FKind::Reg(dest) | FKind::Ld { dest, .. } | FKind::Csr(dest, _) => Some(dest),
+            FKind::Br { .. } | FKind::St { .. } | FKind::MemOrd | FKind::Except(_) => None,
+        };
+
+        Some(input)
+    }
+
+    fn commit(self, lock: &mut Self::Lock) {
+        let Some(dest) = self.0 else {
+            return;
+        };
+        macro_rules! flush {
+            ($pipeline:expr, $dest:expr) => {{
+                let mut trans = $pipeline.make_trans();
+                trans.transform($pipeline, $dest).or_else(|| {
+                    panic!(concat!("cannot flush ", stringify!($pipeline), " pipeline"))
+                });
+                trans.commit($pipeline);
+            }};
+        }
+
+        let Self::Lock { int } = lock;
+        match dest {
+            Dest::Int(dest) => flush!(int, dest),
+        }
+    }
+}
+
+pub struct PipelineFlushLock<'a, T>
+where
+    T: ArchReg,
+    DUop: InferUop<T>,
+    IUop<T>: Issue,
+{
+    rat: rat::FlushLock<'a, T>,
+    lines: &'a mut [Line<T>],
+}
+
+impl<'a, T> PipelineFlushLock<'a, T>
+where
+    T: ArchReg,
+    DUop: InferUop<T>,
+    IUop<T>: Issue,
+{
+    fn new(pipeline: &'a mut Pipeline<T>) -> Self {
+        Self {
+            rat: pipeline.rat.flush(&mut pipeline.prf),
+            lines: &mut pipeline.lines,
+        }
+    }
+}
+
+impl<T> Drop for PipelineFlushLock<'_, T>
+where
+    T: ArchReg,
+    DUop: InferUop<T>,
+    IUop<T>: Issue,
+{
+    fn drop(&mut self) {
+        for (rs, eu) in self.lines.iter_mut() {
+            rs.flush();
+            eu.flush();
+        }
+    }
+}
+
+impl<'a, T> CircuitLock<'a> for PipelineFlushLock<'a, T>
+where
+    T: ArchReg + 'a,
+    DUop: InferUop<T>,
+    IUop<T>: Issue,
+{
+    type Trans = PipelineFlushTrans<T>;
+
+    fn make_trans(&mut self) -> Self::Trans {
+        let Self { rat, lines: _ } = self;
+
+        PipelineFlushTrans {
+            rat: rat.make_trans(),
+        }
+    }
+}
+
+pub struct PipelineFlushTrans<T: ArchReg> {
+    rat: rat::FlushTrans<T>,
+}
+
+impl<'a, T> Transformer<'a> for PipelineFlushTrans<T>
+where
+    T: ArchReg + 'a,
+    DUop: InferUop<T>,
+    IUop<T>: Issue,
+{
+    type In = RegDest<T>;
+    type Out = ();
+    type Lock = PipelineFlushLock<'a, T>;
+
+    fn transform(&mut self, lock: &Self::Lock, input: Self::In) -> Option<Self::Out> {
+        let Self { rat } = self;
+
+        rat.transform(&lock.rat, input)
+            .or_else(|| panic!("cannot flush RAT"));
+
+        Some(())
+    }
+
+    fn commit(self, lock: &mut Self::Lock) {
+        let Self { rat } = self;
+
+        rat.commit(&mut lock.rat);
     }
 }
 
