@@ -3,9 +3,8 @@ use crate::core::{
     Mode,
     csr::{CsrAddr, CsrFile},
     fe::AddrGenLock,
-    pipeline::locks::{CommitLock as PipelineCommitLock, CommitTrans as PipelineCommitTrans},
     reg::int::Uint,
-    uop::{Exception, rename},
+    uop::{Exception, commit::Dest, rename},
 };
 use crate::mem::Addr;
 use crate::seq::{
@@ -123,9 +122,8 @@ enum Special {
     },
 }
 
-pub struct CommitLock<'r, 'p, 'c, 'g, 'm> {
+pub struct CommitLock<'r, 'c, 'g, 'm> {
     pop: PopLock<'r, Slot>,
-    commit: PipelineCommitLock<'p>,
     csrf: &'c mut CsrFile,
     addr_gen: AddrGenLock<'g>,
     mode: &'m mut Buf<Mode>,
@@ -134,17 +132,15 @@ pub struct CommitLock<'r, 'p, 'c, 'g, 'm> {
     special: Special,
 }
 
-impl<'r, 'p, 'c, 'g, 'm> CommitLock<'r, 'p, 'c, 'g, 'm> {
+impl<'r, 'c, 'g, 'm> CommitLock<'r, 'c, 'g, 'm> {
     pub(super) fn new(
         rob: &'r mut Rob,
-        pipelines: PipelineCommitLock<'p>,
         csrf: &'c mut CsrFile,
         addr_gen: AddrGenLock<'g>,
         mode: &'m mut Buf<Mode>,
     ) -> Self {
         Self {
             pop: rob.queue.pop(rob.commit_width),
-            commit: pipelines,
             csrf,
             addr_gen,
             mode,
@@ -155,7 +151,7 @@ impl<'r, 'p, 'c, 'g, 'm> CommitLock<'r, 'p, 'c, 'g, 'm> {
     }
 }
 
-impl Drop for CommitLock<'_, '_, '_, '_, '_> {
+impl Drop for CommitLock<'_, '_, '_, '_> {
     fn drop(&mut self) {
         let count = match self.special {
             Special::None => self.count,
@@ -186,13 +182,12 @@ impl Drop for CommitLock<'_, '_, '_, '_, '_> {
     }
 }
 
-impl<'r, 'p, 'c, 'g, 'm> CircuitLock<'r> for CommitLock<'r, 'p, 'c, 'g, 'm> {
-    type Trans = CommitTrans<'r, 'p, 'c, 'g, 'm>;
+impl<'r, 'c, 'g, 'm> CircuitLock<'r> for CommitLock<'r, 'c, 'g, 'm> {
+    type Trans = CommitTrans<'r, 'c, 'g, 'm>;
 
     fn make_trans(&mut self) -> Self::Trans {
         let trans = matches!(self.special, Special::None).then_some(CommitTransImpl {
             pop: self.pop.make_trans(),
-            commit: self.commit.make_trans(),
             special: Default::default(),
         });
 
@@ -200,21 +195,20 @@ impl<'r, 'p, 'c, 'g, 'm> CircuitLock<'r> for CommitLock<'r, 'p, 'c, 'g, 'm> {
     }
 }
 
-pub struct CommitTrans<'r, 'p, 'c, 'g, 'm>(
+pub struct CommitTrans<'r, 'c, 'g, 'm>(
     Option<CommitTransImpl<'r>>,
-    PhantomData<CommitLock<'r, 'p, 'c, 'g, 'm>>,
+    PhantomData<CommitLock<'r, 'c, 'g, 'm>>,
 );
 
 struct CommitTransImpl<'a> {
     pop: PopTrans<'a, Slot>,
-    commit: PipelineCommitTrans,
     special: Special,
 }
 
-impl<'r, 'p, 'c, 'g, 'm> Transformer<'r> for CommitTrans<'r, 'p, 'c, 'g, 'm> {
+impl<'r, 'c, 'g, 'm> Transformer<'r> for CommitTrans<'r, 'c, 'g, 'm> {
     type In = ();
-    type Out = ();
-    type Lock = CommitLock<'r, 'p, 'c, 'g, 'm>;
+    type Out = Option<Dest>;
+    type Lock = CommitLock<'r, 'c, 'g, 'm>;
 
     fn transform(&mut self, lock: &Self::Lock, input: Self::In) -> Option<Self::Out> {
         let trans = self.0.as_mut()?;
@@ -224,17 +218,14 @@ impl<'r, 'p, 'c, 'g, 'm> Transformer<'r> for CommitTrans<'r, 'p, 'c, 'g, 'm> {
                 UopKind::Ld { done: false, .. }
                 | UopKind::Br { done: false }
                 | UopKind::St { done: false } => None,
-                UopKind::Reg(dest) | UopKind::Ld { dest, done: true } => {
-                    trans.commit.transform(&lock.commit, dest)
-                }
+                UopKind::Reg(dest) | UopKind::Ld { dest, done: true } => Some(Some(dest)),
                 UopKind::Br { done: true } | UopKind::St { done: true } | UopKind::MemOrd => {
-                    Some(())
+                    Some(None)
                 }
                 UopKind::Csr(dest, csr) => {
-                    trans.commit.transform(&lock.commit, dest).inspect(|_| {
-                        let old = std::mem::replace(&mut trans.special, Special::Csr(csr));
-                        debug_assert_matches!(old, Special::None);
-                    })
+                    let old = std::mem::replace(&mut trans.special, Special::Csr(csr));
+                    debug_assert_matches!(old, Special::None);
+                    Some(Some(dest))
                 }
                 UopKind::Except(ex) => {
                     let old = std::mem::replace(
@@ -242,21 +233,16 @@ impl<'r, 'p, 'c, 'g, 'm> Transformer<'r> for CommitTrans<'r, 'p, 'c, 'g, 'm> {
                         Special::Exception { ex, pc: entry.addr },
                     );
                     debug_assert_matches!(old, Special::None);
-                    Some(())
+                    Some(None)
                 }
             }
         })
     }
 
     fn commit(self, lock: &mut Self::Lock) {
-        let CommitTransImpl {
-            pop,
-            commit,
-            special,
-        } = self.0.unwrap();
+        let CommitTransImpl { pop, special } = self.0.unwrap();
 
         pop.commit(&mut lock.pop);
-        commit.commit(&mut lock.commit);
         lock.count += 1;
         debug_assert_matches!(lock.special, Special::None);
         lock.special = special;

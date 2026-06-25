@@ -12,7 +12,6 @@ pub(super) struct Entry {
     pub kind: Buf<UopKind>,
     pub addr: Addr,
     pub comp: bool,
-    pub flush: bool,
 }
 
 //TODO If the Jump is resolved at the EXECUTE stage, not the COMMIT stage,
@@ -41,7 +40,6 @@ impl From<rename::Uop> for Entry {
             kind: Buf::new(kind),
             addr,
             comp,
-            flush: false,
         }
     }
 }

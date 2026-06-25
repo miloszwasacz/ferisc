@@ -11,6 +11,16 @@ use crate::seq::locks::{CircuitLock, Transformer};
 use std::cmp::Reverse;
 use std::debug_assert_matches;
 
+macro_rules! commit_trans {
+    ($self:expr, $lock:expr) => {{
+        let Self { int, kind } = $self;
+        match kind {
+            UopKind::Int => int.commit(&mut $lock.int),
+            UopKind::None => {}
+        }
+    }};
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 enum UopKind {
     #[default]
@@ -86,11 +96,7 @@ impl<'a> Transformer<'a> for RenameTrans {
     }
 
     fn commit(self, lock: &mut Self::Lock) {
-        let Self { int, kind } = self;
-        match kind {
-            UopKind::Int => int.commit(&mut lock.int),
-            UopKind::None => {}
-        }
+        commit_trans!(self, lock);
     }
 }
 
@@ -141,11 +147,7 @@ impl<'a> Transformer<'a> for DispatchTrans {
     }
 
     fn commit(self, lock: &mut Self::Lock) {
-        let Self { int, kind } = self;
-        match kind {
-            UopKind::Int => int.commit(&mut lock.int),
-            UopKind::None => {}
-        }
+        commit_trans!(self, lock);
     }
 }
 
@@ -271,7 +273,7 @@ impl<'a> CircuitLock<'a> for CommitLock<'a> {
         CommitTrans {
             int: self.int.make_trans(),
 
-            dest: None,
+            kind: UopKind::None,
         }
     }
 }
@@ -279,30 +281,30 @@ impl<'a> CircuitLock<'a> for CommitLock<'a> {
 pub struct CommitTrans {
     int: rat::CommitTrans<IntReg>,
 
-    dest: Option<Dest>,
+    kind: UopKind,
 }
 
 impl<'a> Transformer<'a> for CommitTrans {
-    type In = Dest;
+    type In = Option<Dest>;
     type Out = ();
     type Lock = CommitLock<'a>;
 
     fn transform(&mut self, lock: &Self::Lock, input: Self::In) -> Option<Self::Out> {
-        let Self { int, dest } = self;
-        let old = dest.replace(input);
-        debug_assert!(old.is_none());
+        let Self { int, kind } = self;
 
-        match input {
-            Dest::Int(input) => int.transform(&lock.int, input),
-        }
+        debug_assert_matches!(kind, UopKind::None);
+        *kind = match input {
+            None => UopKind::None,
+            Some(dest) => match dest {
+                Dest::Int(dest) => int.transform(&lock.int, dest).map(|_| UopKind::Int),
+            }?,
+        };
+
+        Some(())
     }
 
     fn commit(self, lock: &mut Self::Lock) {
-        let Self { int, dest } = self;
-
-        match dest.unwrap() {
-            Dest::Int(_) => int.commit(&mut lock.int),
-        }
+        commit_trans!(self, lock);
     }
 }
 

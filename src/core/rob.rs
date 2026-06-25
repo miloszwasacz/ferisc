@@ -5,8 +5,7 @@ use crate::core::{
     Mode,
     csr::CsrFile,
     fe::AddrGenLock,
-    pipeline::locks::CommitLock as PipelineCommitLock,
-    uop::{Exception, rename},
+    uop::{Exception, commit::Dest, rename},
 };
 use crate::seq::{Buf, Pbuf, Queue, locks::StageLock};
 use std::cell::RefCell;
@@ -36,12 +35,11 @@ impl Rob {
 
     pub fn commit(
         &mut self,
-        pipelines: PipelineCommitLock<'_>,
         csrf: &mut CsrFile,
         addr_gen: AddrGenLock<'_>,
         mode: &mut Buf<Mode>,
-    ) -> impl StageLock<'_, (), ()> {
-        CommitLock::new(self, pipelines, csrf, addr_gen, mode)
+    ) -> impl StageLock<'_, (), Option<Dest>> {
+        CommitLock::new(self, csrf, addr_gen, mode)
     }
 }
 
@@ -85,9 +83,5 @@ impl EntryHandle {
 
     pub fn throw(&mut self, exception: Exception) {
         with_entry!(self, |entry| entry.kind.write(UopKind::Except(exception)));
-    }
-
-    pub fn flush(&mut self) {
-        with_entry!(self, |entry| entry.flush = true);
     }
 }

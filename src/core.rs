@@ -62,6 +62,13 @@ impl Core {
             .substage(dispatch)
             .execute();
 
+        // Commit
+        self.rob
+            .commit(&mut self.csrf, addr_gen.clone(), &mut self.mode)
+            .into_pipeline_stage()
+            .substage(self.pipelines.commit())
+            .execute();
+
         let cycle = self.csrf.mcycle.read();
         self.csrf.mcycle.implicit_write(cycle + 1);
 

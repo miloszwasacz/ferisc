@@ -40,9 +40,9 @@ impl<'a, T: 'a> Transformer<'a> for PushTrans<T> {
         }
     }
 
-    fn commit(mut self, lock: &mut Self::Lock) {
+    fn commit(self, lock: &mut Self::Lock) {
         debug_assert!(lock.free_space > 0);
-        lock.queue.buf.push_back(self.0.take().unwrap());
+        lock.queue.buf.push_back(self.0.unwrap());
         lock.free_space -= 1;
         #[cfg(debug_assertions)]
         lock.queue.state.insert(super::State::PUSHED);
