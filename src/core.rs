@@ -3,7 +3,7 @@ use self::fe::{AddrGen, decode::DecodeUnit, fetch::FetchUnit, predecode::Predeco
 use self::mem::{DirectHierarchy, MemSubsystem};
 use self::pipeline::Pipelines;
 use self::rob::Rob;
-use crate::seq::{Buf, Clearable, PipelineStage, Sequential};
+use crate::seq::{Buf, Clearable, IntoPipelineStage, PipelineStage, Sequential};
 use std::ops::DerefMut;
 
 pub mod fe;
@@ -52,7 +52,9 @@ impl Core {
 
         // Rename/Dispatch
         let (rename, dispatch) = self.pipelines.input_locks();
-        PipelineStage::new(self.decode.lock())
+        self.decode
+            .lock()
+            .into_pipeline_stage()
             .copied()
             .substage(rename)
             .substage(self.rob.dispatch())

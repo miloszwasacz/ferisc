@@ -79,3 +79,18 @@ impl<'a, T: CircuitLock<'a>> PipelineStage<T> {
         }
     }
 }
+
+pub trait IntoPipelineStage {
+    fn into_pipeline_stage(self) -> PipelineStage<Self>
+    where
+        Self: Sized;
+}
+
+impl<'a, T> IntoPipelineStage for T
+where
+    T: CircuitLock<'a, Trans: Transformer<'a, In = ()>>,
+{
+    fn into_pipeline_stage(self) -> PipelineStage<Self> {
+        PipelineStage::new(self)
+    }
+}
