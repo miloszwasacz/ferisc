@@ -39,6 +39,10 @@ macro_rules! fields {
 fields!(pi, po, pr, pw, si, so, sr, sw);
 
 impl Fence {
+    pub const fn none() -> Self {
+        Self(Fields::empty())
+    }
+
     pub const fn is_none(&self) -> bool {
         self.0.is_empty()
     }

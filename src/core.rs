@@ -4,7 +4,7 @@ use self::ee::{
     rob::{Rob, RobAccess},
 };
 use self::fe::{AddrGen, decode::DecodeUnit, fetch::FetchUnit, predecode::Predecoder};
-use self::mem::{DirectHierarchy, MemSubsystem};
+use self::mem::{MemHierarchy, MemSubsystem};
 use crate::seq::{Buf, Clearable, IntoPipelineStage, PipelineStage, Sequential};
 use std::ops::DerefMut;
 
@@ -15,27 +15,29 @@ pub mod mem;
 pub mod reg;
 pub mod uop;
 
-pub struct Core {
+pub struct Core<H: MemHierarchy> {
     addr_gen: AddrGen,
-    fetch: FetchUnit,
+    fetch: FetchUnit<H::IMem>,
     predecode: Predecoder,
     decode: DecodeUnit,
     pipelines: Pipelines,
     rob: Rob,
 
-    mem: MemSubsystem<DirectHierarchy>,
+    mem: MemSubsystem<H::DMem>,
+    hier: H,
+
     csrf: CsrFile,
     mode: Buf<Mode>,
 }
 
-impl Core {
+impl<H: MemHierarchy> Core<H> {
     pub fn tick(&mut self) {
         let addr_gen = self.addr_gen.lock();
         let mode = self.mode.read_copied();
 
         //TODO Process tick
         {
-            let mut imem = self.mem.imem();
+            let mut imem = self.hier.imem();
 
             // Fetch
             let fetch = self
@@ -96,7 +98,7 @@ impl Core {
         //TODO How to update BTB and BP when flushing?
         let flush = addr_gen.apply();
         if flush.flush_fetch() {
-            self.fetch.clear(self.mem.imem().deref_mut());
+            self.fetch.clear(self.hier.imem().deref_mut());
             self.predecode.clear();
         }
         if flush.flush_decode() {
@@ -107,7 +109,7 @@ impl Core {
     }
 }
 
-impl Sequential for Core {
+impl<H: MemHierarchy> Sequential for Core<H> {
     fn finish_cycle(&mut self) {
         self.fetch.finish_cycle();
         self.predecode.finish_cycle();

@@ -1,6 +1,7 @@
 use super::FetchUnit;
 use crate::core::{
     fe::{AddrGenLock, predecode::PredecodeLock},
+    mem::IMem,
     uop::{Exception, fetch::FetchPacket, predecode::Predecoded},
 };
 use crate::mem::{Addr, LdReq, Mem, ReqData};
@@ -8,29 +9,21 @@ use crate::seq::locks::{CircuitLock, Transformer};
 use std::collections::vec_deque::Iter;
 use std::marker::PhantomData;
 
-pub struct FetchLock<'u, 'm, 'g, 'd, M>(Option<LockImpl<'u, 'm, 'g, 'd, M>>)
-where
-    M: Mem<LdReq<Exception>, Output = Result<ReqData, Exception>>;
+pub struct FetchLock<'u, 'm, 'g, 'd, M: IMem>(Option<LockImpl<'u, 'm, 'g, 'd, M>>);
 
-struct LockImpl<'u, 'm, 'g, 'd, M>
-where
-    M: Mem<LdReq<Exception>, Output = Result<ReqData, Exception>>,
-{
-    unit: *mut FetchUnit<M::Conn, M::Handle>,
+struct LockImpl<'u, 'm, 'g, 'd, M: IMem> {
+    unit: *mut FetchUnit<M>,
     mem: &'m mut M,
     addr_gen: AddrGenLock<'g>,
     predecode: PredecodeLock<'d>,
     iter: Iter<'u, Predecoded>,
     popped: usize,
-    _unit: PhantomData<&'u mut FetchUnit<M::Conn, M::Handle>>,
+    _unit: PhantomData<&'u mut FetchUnit<M>>,
 }
 
-impl<'u, 'm, 'g, 'd, M> FetchLock<'u, 'm, 'g, 'd, M>
-where
-    M: Mem<LdReq<Exception>, Output = Result<ReqData, Exception>>,
-{
+impl<'u, 'm, 'g, 'd, M: IMem> FetchLock<'u, 'm, 'g, 'd, M> {
     pub(super) fn new(
-        unit: &'u mut FetchUnit<M::Conn, M::Handle>,
+        unit: &'u mut FetchUnit<M>,
         mem: &'m mut M,
         addr_gen: AddrGenLock<'g>,
         predecode: PredecodeLock<'d>,
@@ -47,10 +40,7 @@ where
     }
 }
 
-impl<'u, 'm, 'g, 'd, M> CircuitLock<'u> for FetchLock<'u, 'm, 'g, 'd, M>
-where
-    M: Mem<LdReq<Exception>, Output = Result<ReqData, Exception>>,
-{
+impl<'u, 'm, 'g, 'd, M: IMem> CircuitLock<'u> for FetchLock<'u, 'm, 'g, 'd, M> {
     type Trans = FetchTrans<'u, 'm, 'g, 'd, M>;
 
     fn make_trans(&mut self) -> Self::Trans {
@@ -61,10 +51,7 @@ where
     }
 }
 
-impl<M> Drop for FetchLock<'_, '_, '_, '_, M>
-where
-    M: Mem<LdReq<Exception>, Output = Result<ReqData, Exception>>,
-{
+impl<M: IMem> Drop for FetchLock<'_, '_, '_, '_, M> {
     fn drop(&mut self) {
         let (unit, mem, mut addr_gen, mut predecode, popped) = unsafe {
             // SAFETY: iter is dropped so it is safe to interact with the fetch unit again
@@ -117,10 +104,7 @@ where
     }
 }
 
-pub struct FetchTrans<'u, 'm, 'g, 'd, M>
-where
-    M: Mem<LdReq<Exception>, Output = Result<ReqData, Exception>>,
-{
+pub struct FetchTrans<'u, 'm, 'g, 'd, M: IMem> {
     item: Option<&'u Predecoded>,
     _lock: PhantomData<FetchLock<'u, 'm, 'g, 'd, M>>,
 }

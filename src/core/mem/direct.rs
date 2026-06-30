@@ -1,7 +1,7 @@
 use super::MemHierarchy;
-use crate::core::uop::Exception;
 use crate::mem::Dram;
-use std::sync::{Arc, RwLock, RwLockWriteGuard};
+use std::ops::DerefMut;
+use std::sync::{Arc, RwLock};
 
 #[derive(Debug)]
 pub struct DirectHierarchy {
@@ -15,15 +15,14 @@ impl DirectHierarchy {
 }
 
 impl MemHierarchy for DirectHierarchy {
-    type Err = Exception;
-    type IMem<'a> = RwLockWriteGuard<'a, Dram>;
-    type DMem<'a> = RwLockWriteGuard<'a, Dram>;
+    type IMem = Dram;
+    type DMem = Dram;
 
-    fn imem(&mut self) -> Self::IMem<'_> {
+    fn imem(&mut self) -> impl DerefMut<Target = Self::IMem> {
         self.dram.write().unwrap()
     }
 
-    fn dmem(&mut self) -> Self::DMem<'_> {
+    fn dmem(&mut self) -> impl DerefMut<Target = Self::DMem> {
         self.dram.write().unwrap()
     }
 }
