@@ -81,7 +81,7 @@ impl<'a, M: DMem> Transformer<'a> for DispatchTrans<'a, M> {
 
         let dispatched = Cell::default();
         let add_ld = |size, signed, dest| {
-            if lock.mem.ldq.len() >= lock.mem.ldq_size {
+            if lock.mem.ldq.free_space() > 0 {
                 return None;
             }
 
@@ -101,7 +101,7 @@ impl<'a, M: DMem> Transformer<'a> for DispatchTrans<'a, M> {
             Some(handle.into())
         };
         let add_st = |size, src| {
-            if lock.mem.stq.len() >= lock.mem.stq_size {
+            if lock.mem.stq.free_space() > 0 {
                 return None;
             }
 
@@ -146,13 +146,13 @@ impl<'a, M: DMem> Transformer<'a> for DispatchTrans<'a, M> {
             Dispatched::None => {}
             Dispatched::Ld(s) => {
                 lock.st_deps.push(Handle::new(&s).into());
-                lock.mem.ldq.push_back(s);
+                lock.mem.ldq.push(s);
             }
             Dispatched::St(s) => {
                 let handle = Handle::new(&s);
                 lock.ld_deps.push(handle.clone());
                 lock.st_deps.push(handle.into());
-                lock.mem.stq.push_back(s);
+                lock.mem.stq.push(s);
             }
         }
 

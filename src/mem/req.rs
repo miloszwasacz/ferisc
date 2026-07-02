@@ -91,10 +91,10 @@ impl_req! {
 
 impl_req! {
     impl<E> StReq<E> {
-        pub fn new(addr: u64, size: usize, data: ReqData) -> Self {
+        pub fn new(addr: u64, data: ReqData) -> Self {
             Self(Req {
                 addr,
-                size,
+                size: data.len(),
                 state: ReqState::Incomplete(data),
             })
         }

@@ -6,6 +6,7 @@ use crate::core::{
         rs::Rs,
     },
     fe::AddrGenLock,
+    mem::AddrBypassBuilder,
     reg::{
         ArchReg,
         int::IntReg,
@@ -43,18 +44,27 @@ where
     DUop: InferUop<T>,
     IUop<T>: Issue<Reg = T> + Clone,
 {
-    pub fn tick(&mut self, rob_lock: &mut ExecuteLock<'_, '_, '_>, csrf: &mut CsrFile)
-    where
+    pub fn tick(
+        &mut self,
+        rob_lock: &mut ExecuteLock<'_, '_, '_>,
+        addr_bypass: &mut AddrBypassBuilder,
+        csrf: &mut CsrFile,
+    ) where
         T::Repr: Clone,
         <IUop<T> as Issue>::Issued: Execute<Reg = T>,
     {
         for (rs, eu) in &mut self.lines {
-            let bypass = eu.tick(rob_lock, &mut self.prf, csrf);
+            let bypass = eu.tick(rob_lock, addr_bypass, &mut self.prf, csrf);
             let prf = RefCell::new(&mut self.prf);
 
             rs.issue(|reg| bypass.try_read(&**prf.borrow(), reg).cloned())
                 .into_pipeline_stage()
-                .substage(eu.issue(rob_lock, |reg, val| prf.borrow_mut()[reg].write(val), csrf))
+                .substage(eu.issue(
+                    rob_lock,
+                    |reg, val| prf.borrow_mut()[reg].write(val),
+                    addr_bypass,
+                    csrf,
+                ))
                 .execute();
         }
     }
@@ -96,11 +106,23 @@ pub struct Pipelines {
 }
 
 impl Pipelines {
-    pub fn tick(&mut self, rob: &mut RobLock<'_>, csrf: &mut CsrFile, addr_gen: AddrGenLock<'_>) {
+    pub fn tick(
+        &mut self,
+        rob: &mut RobLock<'_>,
+        addr_bypass: &mut AddrBypassBuilder,
+        csrf: &mut CsrFile,
+        addr_gen: AddrGenLock<'_>,
+    ) {
         let Self { int } = self;
         let mut rob_lock = rob.execute(addr_gen);
 
-        int.tick(&mut rob_lock, csrf);
+        int.tick(&mut rob_lock, addr_bypass, csrf);
+    }
+
+    pub fn prfs(&mut self) -> Prfs<'_> {
+        let Self { int } = self;
+
+        Prfs { int: &mut int.prf }
     }
 }
 
@@ -118,4 +140,8 @@ impl Clearable for Pipelines {
 
         int.clear();
     }
+}
+
+pub struct Prfs<'a> {
+    pub int: &'a mut Prf<IntReg>,
 }

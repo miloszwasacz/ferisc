@@ -1,6 +1,7 @@
 use crate::core::{
     csr::CsrFile,
     ee::rob::{self, locks::ExecuteLock},
+    mem::AddrBypassBuilder,
     reg::{ArchReg, phys::RegOper},
 };
 
@@ -20,6 +21,7 @@ pub trait Execute {
         rob_entry: rob::EntryHandle,
         lock: &mut ExecuteLock<'_, '_, '_>,
         write_reg: &mut impl WriteReg<Self::Reg>,
+        addr_bypass: &mut AddrBypassBuilder,
         csrf: &mut CsrFile,
     );
 }

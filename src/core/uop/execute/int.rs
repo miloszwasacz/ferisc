@@ -2,6 +2,7 @@ use super::{Execute, Latency, WriteReg};
 use crate::core::{
     csr::CsrFile,
     ee::rob::{EntryHandle, locks::ExecuteLock},
+    mem::AddrBypassBuilder,
     reg::int::{IntReg, IntVal, Sint, Uint},
     uop::{int::*, issue::int::Uop},
 };
@@ -38,6 +39,7 @@ impl Execute for Uop {
         mut rob_entry: EntryHandle,
         lock: &mut ExecuteLock<'_, '_, '_>,
         write_reg: &mut impl WriteReg<Self::Reg>,
+        addr_bypass: &mut AddrBypassBuilder,
         csrf: &mut CsrFile,
     ) {
         type Sword = i32;
@@ -220,18 +222,8 @@ impl Execute for Uop {
                     //TODO Notify BTB if taken
                 }
             }
-            Uop::Lda {
-                base,
-                offset,
-                mut dest,
-            }
-            | Uop::Sta {
-                base,
-                offset,
-                #[allow(unused_mut)]
-                mut dest,
-            } => {
-                dest.write(base.addr().wrapping_add_signed(offset.s()));
+            Uop::Lda { base, offset, dest } | Uop::Sta { base, offset, dest } => {
+                addr_bypass.write_addr(dest, base.addr().wrapping_add_signed(offset.s()));
             }
             Uop::Csr { op, csr, src, dest } => match csrf.access(csr, op, src) {
                 Ok(out) => {

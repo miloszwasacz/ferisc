@@ -1,16 +1,24 @@
+pub use self::bypass::{AddrBuf, AddrBypass, AddrBypassBuilder};
 use super::Slot;
 use crate::core::{
     ee::rob,
     reg::{int::IntReg, phys::RegOper},
     uop::commit::Dest,
 };
-use crate::mem::Addr;
-use crate::seq::Buf;
 use std::cell::RefCell;
-use std::ops::{Deref, DerefMut, Range};
+use std::ops::{Deref, DerefMut};
 use std::rc::Weak;
 
-type AddrBuf = Buf<Option<Addr>>;
+macro_rules! apply_to_handle {
+    ($handle:expr, |$h:ident| $body:expr) => {
+        match $handle {
+            HandleType::Ld($h) => $body,
+            HandleType::St($h) => $body,
+        }
+    };
+}
+
+mod bypass;
 
 #[derive(Debug, Clone)]
 pub(super) struct Entry<M> {
@@ -81,16 +89,10 @@ impl<M> Handle<M> {
         Self(Slot::downgrade(slot))
     }
 
-    pub(super) fn addr_range(&self) -> Option<Range<Addr>> {
-        let e = self
-            .0
+    fn expect(&self) -> Slot<M> {
+        self.0
             .upgrade()
-            .expect("handle should not be flushed or already executed");
-        let e = e.borrow();
-
-        let start = e.addr.read_copied()?;
-        let end = start + (e.size as Addr);
-        Some(start..end)
+            .expect("handle should not be flushed or already executed")
     }
 }
 
@@ -101,35 +103,6 @@ pub struct AddrHandle(pub(super) HandleType);
 pub(super) enum HandleType {
     Ld(Handle<LdEntry>),
     St(Handle<StEntry>),
-}
-
-macro_rules! apply_to_handle {
-    ($handle:expr, |$h:ident| $body:expr) => {
-        match $handle {
-            HandleType::Ld($h) => $body,
-            HandleType::St($h) => $body,
-        }
-    };
-}
-
-impl AddrHandle {
-    pub fn write(&mut self, addr: Addr) {
-        apply_to_handle!(&mut self.0, |handle| {
-            let e = handle
-                .0
-                .upgrade()
-                .expect("handle should not be flushed or already executed");
-            let mut e = e.borrow_mut();
-
-            let buf = &mut e.addr;
-            debug_assert!(buf.read().is_none(), "address already computed");
-            buf.write(Some(addr));
-        });
-    }
-
-    pub(super) fn addr_range(&self) -> Option<Range<Addr>> {
-        apply_to_handle!(&self.0, |handle| handle.addr_range())
-    }
 }
 
 impl From<Handle<LdEntry>> for AddrHandle {

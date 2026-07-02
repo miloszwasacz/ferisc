@@ -4,7 +4,7 @@ use self::ee::{
     rob::{Rob, RobAccess},
 };
 use self::fe::{AddrGen, decode::DecodeUnit, fetch::FetchUnit, predecode::Predecoder};
-use self::mem::{MemHierarchy, MemSubsystem};
+use self::mem::{AddrBypassBuilder, MemHierarchy, MemSubsystem};
 use crate::seq::{Buf, Clearable, IntoPipelineStage, PipelineStage, Sequential};
 use std::ops::DerefMut;
 
@@ -65,11 +65,16 @@ impl<H: MemHierarchy> Core<H> {
                     .execute();
 
                 // Issue & Execute
+                let mut addr_bypass = AddrBypassBuilder::default();
                 self.pipelines
-                    .tick(&mut rob, &mut self.csrf, addr_gen.clone());
+                    .tick(&mut rob, &mut addr_bypass, &mut self.csrf, addr_gen.clone());
 
-                // // Memory Access
-                // self.mem_unit.tick();
+                // Memory Access
+                self.mem.tick(
+                    self.hier.dmem(),
+                    addr_bypass.build(),
+                    &mut self.pipelines.prfs(),
+                );
 
                 // Commit
                 rob.commit(&mut self.csrf, addr_gen.clone(), &mut self.mode)

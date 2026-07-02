@@ -5,6 +5,7 @@ use crate::core::{
         rob::locks::ExecuteLock,
         rs::{Bypass, BypassBuilder},
     },
+    mem::AddrBypassBuilder,
     reg::phys::Prf,
     uop::execute::{Execute, Latency, Uop, WriteReg},
 };
@@ -27,6 +28,7 @@ impl<U: Execute> Eu<U> {
         &mut self,
         rob_lock: &mut ExecuteLock<'_, '_, '_>,
         write_reg: impl WriteReg<U::Reg>,
+        addr_bypass: &mut AddrBypassBuilder,
         csrf: &mut CsrFile,
     ) -> impl StageLock<'_, Uop<U>, ()> {
         #[cfg(debug_assertions)]
@@ -35,12 +37,13 @@ impl<U: Execute> Eu<U> {
             "cannot issue more than once in a single clock cycle"
         );
 
-        Lock::new(self, rob_lock, write_reg, csrf)
+        Lock::new(self, rob_lock, write_reg, addr_bypass, csrf)
     }
 
     pub fn tick(
         &mut self,
         rob_lock: &mut ExecuteLock<'_, '_, '_>,
+        addr_bypass: &mut AddrBypassBuilder,
         prf: &mut Prf<U::Reg>,
         csrf: &mut CsrFile,
     ) -> Bypass<U::Reg> {
@@ -65,6 +68,7 @@ impl<U: Execute> Eu<U> {
                         rob_entry,
                         rob_lock,
                         &mut |reg, val| bypass.write(reg, val),
+                        addr_bypass,
                         csrf,
                     );
                 }
