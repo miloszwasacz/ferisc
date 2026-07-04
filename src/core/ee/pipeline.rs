@@ -3,14 +3,14 @@ use crate::core::{
     ee::{
         eu::Eu,
         rob::locks::{AccessLock as RobLock, ExecuteLock},
-        rs::Rs,
+        rs::{self, Rs},
     },
     fe::AddrGenLock,
     mem::AddrBypassBuilder,
     reg::{
         ArchReg,
         int::IntReg,
-        phys::{Prf, Rat},
+        phys::{Prf, Rat, RegOper},
     },
     uop::{
         Infer, InferUop, decode::Uop as DecUop, dispatch::Uop as DUop, execute::Execute,
@@ -44,19 +44,22 @@ where
     DUop: InferUop<T>,
     IUop<T>: Issue<Reg = T> + Clone,
 {
-    pub fn tick(
-        &mut self,
+    pub fn tick<'a>(
+        &'a mut self,
         rob_lock: &mut ExecuteLock<'_, '_, '_>,
         addr_bypass: &mut AddrBypassBuilder,
         csrf: &mut CsrFile,
-    ) where
+    ) -> Bypass<'a, T>
+    where
         T::Repr: Clone,
         <IUop<T> as Issue>::Issued: Execute<Reg = T>,
     {
+        let mut bypass = rs::Bypass::empty();
+        for (_, eu) in &mut self.lines {
+            bypass.append(eu.tick(rob_lock, addr_bypass, &mut self.prf, csrf));
+        }
         for (rs, eu) in &mut self.lines {
-            let bypass = eu.tick(rob_lock, addr_bypass, &mut self.prf, csrf);
             let prf = RefCell::new(&mut self.prf);
-
             rs.issue(|reg| bypass.try_read(&**prf.borrow(), reg).cloned())
                 .into_pipeline_stage()
                 .substage(eu.issue(
@@ -67,6 +70,7 @@ where
                 ))
                 .execute();
         }
+        Bypass(bypass, &mut self.prf)
     }
 }
 
@@ -106,23 +110,19 @@ pub struct Pipelines {
 }
 
 impl Pipelines {
-    pub fn tick(
-        &mut self,
+    pub fn tick<'a>(
+        &'a mut self,
         rob: &mut RobLock<'_>,
         addr_bypass: &mut AddrBypassBuilder,
         csrf: &mut CsrFile,
         addr_gen: AddrGenLock<'_>,
-    ) {
+    ) -> BypassNetwork<'a> {
         let Self { int } = self;
         let mut rob_lock = rob.execute(addr_gen);
 
-        int.tick(&mut rob_lock, addr_bypass, csrf);
-    }
-
-    pub fn prfs(&mut self) -> Prfs<'_> {
-        let Self { int } = self;
-
-        Prfs { int: &mut int.prf }
+        BypassNetwork {
+            int: int.tick(&mut rob_lock, addr_bypass, csrf),
+        }
     }
 }
 
@@ -142,6 +142,29 @@ impl Clearable for Pipelines {
     }
 }
 
-pub struct Prfs<'a> {
-    pub int: &'a mut Prf<IntReg>,
+//#region Bypass
+
+pub struct Bypass<'a, T: ArchReg>(rs::Bypass<T>, &'a mut Prf<T>);
+
+impl<'a, T: ArchReg> Bypass<'a, T> {
+    pub fn try_read(&self, reg: RegOper<T>) -> Option<&T::Repr> {
+        self.0.try_read(self.1, reg)
+    }
+
+    pub fn try_read_copied(&self, reg: RegOper<T>) -> Option<T::Repr>
+    where
+        T::Repr: Copy,
+    {
+        self.0.try_read_copied(self.1, reg)
+    }
+
+    pub fn write(&mut self, reg: RegOper<T>, val: T::Repr) {
+        self.1[reg].write(val);
+    }
 }
+
+pub struct BypassNetwork<'a> {
+    pub int: Bypass<'a, IntReg>,
+}
+
+//#endregion

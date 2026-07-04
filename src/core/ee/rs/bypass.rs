@@ -7,6 +7,10 @@ use std::collections::HashMap;
 pub struct Bypass<R: ArchReg>(HashMap<RegOper<R>, R::Repr>);
 
 impl<R: ArchReg> Bypass<R> {
+    pub fn empty() -> Self {
+        Self(HashMap::new())
+    }
+
     pub fn try_read<'a>(&'a self, prf: &'a Prf<R>, reg: RegOper<R>) -> Option<&'a R::Repr> {
         self.0.get(&reg).or_else(|| prf[reg].try_read())
     }
@@ -19,6 +23,15 @@ impl<R: ArchReg> Bypass<R> {
             .get(&reg)
             .copied()
             .or_else(|| prf[reg].try_read_copied())
+    }
+
+    pub fn append(&mut self, other: Self) {
+        debug_assert!(
+            other.0.keys().all(|reg| !self.0.contains_key(reg)),
+            "duplicate operands in bypass networks"
+        );
+
+        self.0.extend(other.0);
     }
 }
 

@@ -5,12 +5,12 @@ use self::entry::{Entry, LdEntry, StEntry};
 use self::locks::DispatchLock;
 use self::queue::Queue;
 use crate::core::{
-    ee::pipeline::Prfs,
+    ee::{pipeline::BypassNetwork, rob::uop::FenceHandle},
     reg::int::IntVal,
-    uop::{Exception, commit::Dest, fence::Fence},
+    uop::{Exception, commit::Dest},
 };
 use crate::mem::{Addr, LdReq, Mem, ReqData, StReq};
-use crate::seq::{Buf, Clearable, Sequential};
+use crate::seq::{Buf, Sequential};
 use static_assertions::const_assert_eq;
 use std::cell::RefCell;
 use std::ops::DerefMut;
@@ -70,7 +70,7 @@ pub struct MemSubsystem<M: DMem> {
     ldq: Queue<LdEntry>,
     stq: Queue<StEntry>,
     req: Req<M>,
-    fence: Buf<Fence>,
+    fence: Buf<FenceHandle>,
     #[cfg(debug_assertions)]
     state: State,
 }
@@ -101,7 +101,7 @@ impl<M: DMem> MemSubsystem<M> {
             ldq: Queue::new(ldq_size),
             stq: Queue::new(stq_size),
             req: Req::None,
-            fence: Buf::new(Fence::none()),
+            fence: Buf::new(FenceHandle::detached()),
             #[cfg(debug_assertions)]
             state: State::empty(),
         }
@@ -121,7 +121,7 @@ impl<M: DMem> MemSubsystem<M> {
         &mut self,
         mut dmem: impl DerefMut<Target = M>,
         addr_bypass: AddrBypass,
-        prfs: &mut Prfs<'_>,
+        prfs: &mut BypassNetwork<'_>,
     ) {
         let dmem = dmem.deref_mut();
         let ld_prev = matches!(self.req, Req::Ld(_, _));
@@ -178,7 +178,7 @@ impl<M: DMem> MemSubsystem<M> {
     }
 }
 
-fn write_ld_result(result: ReqData, entry: &Entry<LdEntry>, prfs: &mut Prfs<'_>) {
+fn write_ld_result(result: ReqData, entry: &Entry<LdEntry>, bypass: &mut BypassNetwork<'_>) {
     let data = result.as_ref();
     match entry.dest {
         Dest::Int(dest) => {
@@ -206,10 +206,9 @@ fn write_ld_result(result: ReqData, entry: &Entry<LdEntry>, prfs: &mut Prfs<'_>)
                 }
                 s => panic!("unsupported integer size: {s}"),
             };
-            prfs.int[*dest].write(data);
+            bypass.int.write(*dest, data);
         }
     }
-}
 }
 
 #[cfg(debug_assertions)]

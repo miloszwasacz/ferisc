@@ -370,7 +370,7 @@ impl<'a> Transformer<'a> for FlushTrans {
         debug_assert!(self.0.is_none());
         self.0 = match input.kind {
             FKind::Reg(dest) | FKind::Ld { dest, .. } | FKind::Csr(dest, _) => Some(dest),
-            FKind::Br { .. } | FKind::St { .. } | FKind::MemOrd | FKind::Except(_) => None,
+            FKind::Br { .. } | FKind::St { .. } | FKind::MemOrd(_) | FKind::Except(_) => None,
         };
 
         Some(input)

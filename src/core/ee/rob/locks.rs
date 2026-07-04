@@ -1,10 +1,10 @@
-use super::{EntryHandle, Flush, FlushPriority, FlushedUop, Rob, Slot, UopKind};
+use super::{EntryHandle, Flush, FlushPriority, FlushedUop, Rob, Slot, UopKind, uop::Uop as DUop};
 use crate::core::{
     Mode,
     csr::{CsrAddr, CsrFile},
     fe::AddrGenLock,
     reg::int::Uint,
-    uop::{Exception, commit::Dest, rename},
+    uop::{Exception, commit::Dest, fence::Fence, rename},
 };
 use crate::mem::Addr;
 use crate::seq::{
@@ -29,7 +29,7 @@ impl<'r> AccessLock<'r> {
         Self(rob)
     }
 
-    pub fn dispatch<'a>(&'a mut self) -> impl StageLock<'a, rename::Uop, (rename::Uop, EntryHandle)>
+    pub fn dispatch<'a>(&'a mut self) -> impl StageLock<'a, rename::Uop, (DUop, EntryHandle)>
     where
         'r: 'a,
     {
@@ -80,13 +80,14 @@ pub struct DispatchTrans(PushTrans<Slot>);
 
 impl<'a> Transformer<'a> for DispatchTrans {
     type In = rename::Uop;
-    type Out = (rename::Uop, EntryHandle);
+    type Out = (DUop, EntryHandle);
     type Lock = DispatchLock<'a>;
 
     fn transform(&mut self, lock: &Self::Lock, input: Self::In) -> Option<Self::Out> {
-        let entry = Rc::new(RefCell::new(input.into()));
-        let handle = EntryHandle(Rc::downgrade(&entry));
-        self.0.transform(&lock.0, entry).map(|_| (input, handle))
+        let (entry, uop) = input.into();
+        let entry = Slot::new(RefCell::new(entry));
+        let handle = EntryHandle(Slot::downgrade(&entry));
+        self.0.transform(&lock.0, entry).map(|_| (uop, handle))
     }
 
     fn commit(self, lock: &mut Self::Lock) {
@@ -125,7 +126,7 @@ impl<'a, 'r: 'a, 'g> ExecuteLock<'a, 'r, 'g> {
             // We use `rfind` because the causes will most likely be towards the
             // end of the queue, but it relies on the assumption that there are
             // no duplicates (which would be nonsensical in this context).
-            .rfind(|(_, s)| cause.0.ptr_eq(&Rc::downgrade(s)))
+            .rfind(|(_, s)| cause.0.ptr_eq(&Slot::downgrade(s)))
             .map(|(i, _)| (target, i))
             // We don't need to check whether the new index is smaller because
             // we only search up to the currently earliest cause.
@@ -165,6 +166,7 @@ enum Special {
 
 pub struct CommitLock<'r, 'c, 'g, 'm> {
     pop: PopLock<'r, Slot>,
+    fences: &'r mut Vec<Rc<Fence>>,
     csrf: &'c mut CsrFile,
     addr_gen: AddrGenLock<'g>,
     mode: &'m mut Buf<Mode>,
@@ -180,8 +182,10 @@ impl<'a, 'r: 'a, 'c, 'g, 'm> CommitLock<'a, 'c, 'g, 'm> {
         addr_gen: AddrGenLock<'g>,
         mode: &'m mut Buf<Mode>,
     ) -> Self {
+        debug_assert!(rob.0.committed_fences.is_empty());
         Self {
             pop: rob.0.queue.pop(rob.0.commit_width),
+            fences: &mut rob.0.committed_fences,
             csrf,
             addr_gen,
             mode,
@@ -230,6 +234,7 @@ impl<'r, 'c, 'g, 'm> CircuitLock<'r> for CommitLock<'r, 'c, 'g, 'm> {
         let trans = matches!(self.special, Special::None).then_some(CommitTransImpl {
             pop: self.pop.make_trans(),
             special: Default::default(),
+            fence: None,
         });
 
         CommitTrans(trans, PhantomData)
@@ -244,6 +249,7 @@ pub struct CommitTrans<'r, 'c, 'g, 'm>(
 struct CommitTransImpl<'a> {
     pop: PopTrans<'a, Slot>,
     special: Special,
+    fence: Option<Rc<Fence>>,
 }
 
 impl<'r, 'c, 'g, 'm> Transformer<'r> for CommitTrans<'r, 'c, 'g, 'm> {
@@ -255,23 +261,29 @@ impl<'r, 'c, 'g, 'm> Transformer<'r> for CommitTrans<'r, 'c, 'g, 'm> {
         let trans = self.0.as_mut()?;
         trans.pop.transform(&lock.pop, input).and_then(|slot| {
             let entry = slot.borrow();
-            match entry.kind.read_copied() {
+            match entry.kind.read() {
                 UopKind::Ld { done: false, .. }
                 | UopKind::Br { done: false }
                 | UopKind::St { done: false } => None,
-                UopKind::Reg(dest) | UopKind::Ld { dest, done: true } => Some(Some(dest)),
-                UopKind::Br { done: true } | UopKind::St { done: true } | UopKind::MemOrd => {
-                    Some(None)
-                }
+                UopKind::Reg(dest) | UopKind::Ld { dest, done: true } => Some(Some(*dest)),
+                UopKind::Br { done: true } | UopKind::St { done: true } => Some(None),
                 UopKind::Csr(dest, csr) => {
-                    let old = std::mem::replace(&mut trans.special, Special::Csr(csr));
+                    let old = std::mem::replace(&mut trans.special, Special::Csr(*csr));
                     debug_assert_matches!(old, Special::None);
-                    Some(Some(dest))
+                    Some(Some(*dest))
+                }
+                UopKind::MemOrd(fence) => {
+                    let old = trans.fence.replace(fence.clone());
+                    debug_assert!(old.is_none());
+                    Some(None)
                 }
                 UopKind::Except(ex) => {
                     let old = std::mem::replace(
                         &mut trans.special,
-                        Special::Exception { ex, pc: entry.addr },
+                        Special::Exception {
+                            ex: *ex,
+                            pc: entry.addr,
+                        },
                     );
                     debug_assert_matches!(old, Special::None);
                     Some(None)
@@ -281,12 +293,19 @@ impl<'r, 'c, 'g, 'm> Transformer<'r> for CommitTrans<'r, 'c, 'g, 'm> {
     }
 
     fn commit(self, lock: &mut Self::Lock) {
-        let CommitTransImpl { pop, special } = self.0.unwrap();
+        let CommitTransImpl {
+            pop,
+            special,
+            fence,
+        } = self.0.unwrap();
 
         pop.commit(&mut lock.pop);
         lock.count += 1;
         debug_assert_matches!(lock.special, Special::None);
         lock.special = special;
+        if let Some(fence) = fence {
+            lock.fences.push(fence);
+        }
     }
 }
 
@@ -301,6 +320,7 @@ pub struct FlushLock<'r>(
 
 impl<'a> FlushLock<'a> {
     pub(super) fn new(rob: &'a mut Rob, after: usize) -> Self {
+        debug_assert!(rob.committed_fences.is_empty());
         let from = (after + 1).max(rob.queue.len() - rob.flush_width);
         if from == after + 1 {
             rob.flush.clear();
@@ -312,19 +332,20 @@ impl<'a> FlushLock<'a> {
                 let flushed = {
                     let entry = slot.borrow();
                     FlushedUop {
-                        kind: entry.kind.read_copied(),
+                        kind: entry.kind.read().into(),
                         addr: entry.addr,
                         comp: entry.comp,
                     }
                 };
                 {
-                    let check = Rc::downgrade(&slot);
+                    #[cfg(debug_assertions)]
+                    let check = Slot::downgrade(&slot);
                     drop(slot);
                     #[cfg(debug_assertions)]
                     if let Some(slot) = check.upgrade() {
                         panic!(
                             "ROB slot was not flushed properly (slot strong ref count: {})",
-                            Rc::strong_count(&slot) - 1
+                            Slot::strong_count(&slot) - 1
                         );
                     }
                 }
@@ -362,6 +383,7 @@ pub struct FlushAllLock<'a>(PhantomData<&'a mut Rob>);
 
 impl<'a> FlushAllLock<'a> {
     pub(super) fn new(rob: &'a mut Rob) -> Self {
+        debug_assert!(rob.committed_fences.is_empty());
         rob.flush.clear();
         rob.queue.clear();
 

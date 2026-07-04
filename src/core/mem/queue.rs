@@ -1,12 +1,25 @@
 use super::{
     AddrBypass, DMem, Req, Slot,
-    entry::{LdEntry, StEntry},
+    entry::{LdEntry, Src, StEntry},
 };
-use crate::core::ee::pipeline::Prfs;
-use crate::core::mem::entry::Src;
+use crate::core::ee::pipeline::BypassNetwork;
 use crate::mem::{LdReq, ReqData, StReq};
 use crate::seq::{Buf, Sequential};
 use std::ops::{Index, IndexMut};
+
+macro_rules! impl_both {
+    (impl Queue<T> {
+        $( $tt:tt )*
+    }) => {
+        impl Queue<LdEntry> {
+            $( $tt )*
+        }
+
+        impl Queue<StEntry> {
+            $( $tt )*
+        }
+    };
+}
 
 //TODO Add notes that this struct does not guard against the "imperativeness" of the code
 
@@ -40,30 +53,28 @@ impl<T> Queue<T> {
         self.queue.push(slot);
     }
 
-    pub fn flush(&mut self) {
-        self.queue.retain(|s| !s.borrow().rob_entry.is_flushed());
-    }
-
     pub fn flush_all(&mut self) {
         self.queue.clear();
         self.len.write(0);
     }
 }
 
-macro_rules! update_deps {
-    ($queue:expr, $bypass:expr) => {{
-        $queue
-            .iter_mut()
-            .enumerate()
-            .for_each(|(_, s)| s.borrow_mut().update_deps($bypass));
-    }};
+impl_both! {
+    impl Queue<T> {
+        pub fn update_deps(&mut self, addr_bypass: &AddrBypass) {
+            let _ = addr_bypass;
+            for s in self.queue.iter_mut().take(self.len.read_copied()) {
+                s.borrow_mut().update_deps();
+            }
+        }
+
+        pub fn flush(&mut self) {
+            self.queue.retain(|s| s.borrow().rob_entry.is_flushed());
+        }
+    }
 }
 
 impl Queue<LdEntry> {
-    pub fn update_deps(&mut self, addr_bypass: &AddrBypass) {
-        update_deps!(self.queue, addr_bypass);
-    }
-
     //TODO Add docs explaining how this can remove an element which influences `free_space`
     pub fn schedule_ready<M: DMem>(
         &mut self,
@@ -92,17 +103,13 @@ impl Queue<LdEntry> {
 }
 
 impl Queue<StEntry> {
-    pub fn update_deps(&mut self, addr_bypass: &AddrBypass) {
-        update_deps!(self.queue, addr_bypass);
-    }
-
     //TODO Add docs explaining how this can remove an element which influences `free_space`
     pub fn schedule_ready<M: DMem>(
         &mut self,
         mem: &mut M,
         conn: st_mem!(<M>::Conn),
         addr_bypass: &AddrBypass,
-        prfs: &Prfs<'_>,
+        bypass: &BypassNetwork<'_>,
     ) -> Req<M> {
         let mut req = Req::None;
         self.queue.retain(|s| {
@@ -117,7 +124,7 @@ impl Queue<StEntry> {
                 };
                 let data = match e.src {
                     Src::Int(reg) => {
-                        let Some(data) = prfs.int[reg].try_read_copied() else {
+                        let Some(data) = bypass.int.try_read_copied(reg) else {
                             return true;
                         };
                         ReqData::from(&data.u().to_le_bytes()[..e.size])

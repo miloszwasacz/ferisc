@@ -66,15 +66,16 @@ impl<H: MemHierarchy> Core<H> {
 
                 // Issue & Execute
                 let mut addr_bypass = AddrBypassBuilder::default();
-                self.pipelines
-                    .tick(&mut rob, &mut addr_bypass, &mut self.csrf, addr_gen.clone());
+                let mut bypass = self.pipelines.tick(
+                    &mut rob,
+                    &mut addr_bypass,
+                    &mut self.csrf,
+                    addr_gen.clone(),
+                );
 
                 // Memory Access
-                self.mem.tick(
-                    self.hier.dmem(),
-                    addr_bypass.build(),
-                    &mut self.pipelines.prfs(),
-                );
+                self.mem
+                    .tick(self.hier.dmem(), addr_bypass.build(), &mut bypass);
 
                 // Commit
                 rob.commit(&mut self.csrf, addr_gen.clone(), &mut self.mode)
@@ -86,13 +87,13 @@ impl<H: MemHierarchy> Core<H> {
                 flush
                     .into_pipeline_stage()
                     .substage(self.pipelines.flush())
-                    //TODO Flush memory subsystem
+                    .substage(self.mem.flush(self.hier.dmem()))
                     .transform(|_| ())
                     .execute();
             }
             RobAccess::FlushAll(_) => {
                 self.pipelines.clear();
-                //TODO Flush memory subsystem
+                self.mem.flush_all(self.hier.dmem());
             }
         }
 

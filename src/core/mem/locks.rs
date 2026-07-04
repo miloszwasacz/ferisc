@@ -1,46 +1,55 @@
-use self::deps::Deps;
 use self::into::IntoDKind;
 use super::{
     AddrHandle, DMem, Entry, LdEntry, MemSubsystem, Slot, StEntry,
     entry::{Handle, Src},
 };
 use crate::core::{
-    ee::rob,
+    ee::rob::{
+        self, FlushedUop,
+        uop::{FenceHandle, Uop as RUop, UopKind as RKind},
+    },
     uop::{
         commit::Dest,
         dispatch::{Uop as DUop, UopKind as DKind, int as dint},
-        fence::Fence,
-        rename::{Uop as RUop, UopKind as RKind, int as rint},
+        rename::int as rint,
     },
 };
 use crate::seq::locks::{CircuitLock, Transformer};
 use std::cell::{Cell, RefCell};
 use std::debug_assert_matches;
 use std::marker::PhantomData;
+use std::ops::DerefMut;
 
-mod deps;
 mod into;
 
 //#region Dispatch
 
-type LdDep = Handle<StEntry>;
-type StDep = AddrHandle;
-
 pub struct DispatchLock<'a, M: DMem> {
     mem: &'a mut MemSubsystem<M>,
-    ld_deps: Deps<LdDep>,
-    st_deps: Deps<StDep>,
-    fence: Fence,
+    loads: Vec<Handle<LdEntry>>,
+    stores: Vec<Handle<StEntry>>,
+    fence: FenceHandle,
 }
 
 impl<'a, M: DMem> DispatchLock<'a, M> {
     pub(super) fn new(mem: &'a mut MemSubsystem<M>) -> Self {
-        let fence = mem.fence.read_copied();
+        let loads = mem.ldq.iter().map(Handle::new).collect();
+        let stores = mem.stq.iter().map(Handle::new).collect();
+        let fence = mem.fence.read().clone();
+
         Self {
             mem,
-            ld_deps: Default::default(),
-            st_deps: Default::default(),
+            loads,
+            stores,
             fence,
+        }
+    }
+}
+
+impl<'a, M: DMem> Drop for DispatchLock<'a, M> {
+    fn drop(&mut self) {
+        if !self.fence.is_none() {
+            self.mem.fence.write(self.fence.clone());
         }
     }
 }
@@ -51,7 +60,7 @@ impl<'a, M: DMem> CircuitLock<'a> for DispatchLock<'a, M> {
     fn make_trans(&mut self) -> Self::Trans {
         DispatchTrans {
             dispatched: Dispatched::None,
-            fence: self.fence,
+            fence: self.fence.clone(),
             _conn: PhantomData,
         }
     }
@@ -59,7 +68,7 @@ impl<'a, M: DMem> CircuitLock<'a> for DispatchLock<'a, M> {
 
 pub struct DispatchTrans<'a, M: DMem> {
     dispatched: Dispatched,
-    fence: Fence,
+    fence: FenceHandle,
     _conn: PhantomData<&'a mut MemSubsystem<M>>,
 }
 
@@ -78,21 +87,34 @@ impl<'a, M: DMem> Transformer<'a> for DispatchTrans<'a, M> {
 
     fn transform(&mut self, lock: &Self::Lock, input: Self::In) -> Option<Self::Out> {
         let (uop, rob_entry) = input;
-
         let dispatched = Cell::default();
+        let fence = lock.fence.get();
         let add_ld = |size, signed, dest| {
             if lock.mem.ldq.free_space() > 0 {
                 return None;
             }
+            let deps = lock
+                .stores
+                .iter()
+                .cloned()
+                .map(Into::into)
+                .chain(
+                    fence
+                        .is_some_and(|fence| fence.pld() && fence.sld())
+                        .then_some(lock.loads.iter())
+                        .into_iter()
+                        .flatten()
+                        .cloned()
+                        .map(Into::into),
+                )
+                .collect();
 
             let entry = Entry::new(
                 rob_entry.clone(),
                 size,
-                LdEntry {
-                    signed,
-                    dest,
-                    deps: lock.ld_deps.get(lock.mem),
-                },
+                deps,
+                lock.fence.clone(),
+                LdEntry { signed, dest },
             );
             let slot = Slot::new(RefCell::new(entry));
             let handle = Handle::new(&slot);
@@ -104,14 +126,19 @@ impl<'a, M: DMem> Transformer<'a> for DispatchTrans<'a, M> {
             if lock.mem.stq.free_space() > 0 {
                 return None;
             }
+            let deps = lock
+                .stores
+                .iter()
+                .map(|h| h.clone().into())
+                .chain(lock.loads.iter().map(|h| h.clone().into()))
+                .collect();
 
             let entry = Entry::new(
                 rob_entry.clone(),
                 size,
-                StEntry {
-                    src,
-                    deps: lock.st_deps.get(lock.mem),
-                },
+                deps,
+                lock.fence.clone(),
+                StEntry { src },
             );
             let slot = Slot::new(RefCell::new(entry));
             let handle = Handle::new(&slot);
@@ -130,7 +157,7 @@ impl<'a, M: DMem> Transformer<'a> for DispatchTrans<'a, M> {
                 DKind::Handled
             }
             RKind::MemOrd(_) => return None,
-            RKind::Except(_) => DKind::Handled,
+            RKind::Handled => DKind::Handled,
         };
         debug_assert_matches!(self.dispatched, Dispatched::None);
         self.dispatched = dispatched.into_inner();
@@ -145,13 +172,11 @@ impl<'a, M: DMem> Transformer<'a> for DispatchTrans<'a, M> {
         match self.dispatched {
             Dispatched::None => {}
             Dispatched::Ld(s) => {
-                lock.st_deps.push(Handle::new(&s).into());
+                lock.loads.push(Handle::new(&s));
                 lock.mem.ldq.push(s);
             }
             Dispatched::St(s) => {
-                let handle = Handle::new(&s);
-                lock.ld_deps.push(handle.clone());
-                lock.st_deps.push(handle.into());
+                lock.stores.push(Handle::new(&s));
                 lock.mem.stq.push(s);
             }
         }

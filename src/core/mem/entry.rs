@@ -1,7 +1,7 @@
 pub use self::bypass::{AddrBuf, AddrBypass, AddrBypassBuilder};
 use super::Slot;
 use crate::core::{
-    ee::rob,
+    ee::rob::{self, uop::FenceHandle},
     reg::{int::IntReg, phys::RegOper},
     uop::commit::Dest,
 };
@@ -25,15 +25,25 @@ pub(super) struct Entry<M> {
     pub rob_entry: rob::EntryHandle,
     pub addr: AddrBuf,
     pub size: usize,
+    pub deps: Vec<AddrHandle>,
+    pub fence: FenceHandle,
     pub meta: M,
 }
 
 impl<M> Entry<M> {
-    pub fn new(rob_entry: rob::EntryHandle, size: usize, meta: M) -> Self {
+    pub fn new(
+        rob_entry: rob::EntryHandle,
+        size: usize,
+        deps: Vec<AddrHandle>,
+        fence: FenceHandle,
+        meta: M,
+    ) -> Self {
         Self {
             rob_entry,
             addr: Default::default(),
             size,
+            deps,
+            fence,
             meta,
         }
     }
@@ -59,7 +69,6 @@ impl<M> DerefMut for Entry<M> {
 pub(super) struct LdEntry {
     pub signed: bool,
     pub dest: Dest,
-    pub deps: Vec<Handle<StEntry>>,
 }
 
 //#endregion
@@ -69,7 +78,6 @@ pub(super) struct LdEntry {
 #[derive(Debug, Clone)]
 pub(super) struct StEntry {
     pub src: Src,
-    pub deps: Vec<AddrHandle>,
 }
 
 #[derive(Debug, Clone, Copy)]

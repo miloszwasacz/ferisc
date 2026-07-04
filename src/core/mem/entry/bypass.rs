@@ -65,44 +65,77 @@ impl<M> Entry<M> {
             .or_else(|| self.addr.buf.read_copied())
             .map(|addr| addr..(addr + self.size as Addr))
     }
-}
 
-fn addr_ranges_intersect(a: &Range<Addr>, b: &Range<Addr>) -> bool {
-    a.start < b.end && b.start < a.end
-}
-
-macro_rules! check_dep {
-    ($addr_range:expr, $handle:expr) => {{
-        let Some(s) = $handle.0.upgrade() else {
-            return false;
-        };
-        let e = s.borrow();
-        let Some(dep_range) = e.addr_range() else {
-            return true;
-        };
-        addr_ranges_intersect(&$addr_range, &dep_range)
-    }};
-}
-
-impl Entry<LdEntry> {
-    pub(in crate::core::mem) fn update_deps(&mut self, addr_bypass: &AddrBypass) {
-        let _ = addr_bypass;
+    #[inline(always)]
+    fn _update_deps(&mut self, is_load: bool) {
         let Some(addr_range) = self.addr_range() else {
             return;
         };
-        self.deps.retain(|h| check_dep!(addr_range, h));
+        let fence = self.fence.get();
+        let fenced = fence.is_some_and(|fence| {
+            //TODO Distinguish between MEM and MMIO addresses
+            if is_load {
+                fence.si() || fence.sr()
+            } else {
+                fence.so() || fence.sw()
+            }
+        });
+        macro_rules! is_fenced {
+            (|$fence:ident| $fence_chk:expr) => {{ fenced && fence.is_some_and(|$fence| $fence_chk) }};
+        }
+        self.deps.retain(|h| {
+            match &h.0 {
+                HandleType::Ld(h) => {
+                    let Some(s) = h.0.upgrade() else {
+                        // Flushed or already executed
+                        return false;
+                    };
+                    let e = s.borrow();
+                    let Some(dep_range) = e.addr_range() else {
+                        // Prevent WAR + respect fences
+                        return !is_load || is_fenced!(|fence| fence.pld());
+                    };
+                    addr_ranges_intersect(&addr_range, &dep_range)
+                        || is_fenced!(|fence| {
+                            //TODO Distinguish between MEM and MMIO addresses
+                            fence.pi() || fence.pr()
+                        })
+                }
+                HandleType::St(h) => {
+                    let Some(s) = h.0.upgrade() else {
+                        // Flushed or already executed
+                        return false;
+                    };
+                    let e = s.borrow();
+                    let Some(dep_range) = e.addr_range() else {
+                        // Prevent RAW & WAW
+                        return true;
+                    };
+                    addr_ranges_intersect(&addr_range, &dep_range)
+                        || is_fenced!(|fence| {
+                            //TODO Distinguish between MEM and MMIO addresses
+                            fence.po() || fence.pw()
+                        })
+                }
+            }
+        });
+    }
+}
+
+impl Entry<LdEntry> {
+    pub(in crate::core::mem) fn update_deps(&mut self) {
+        self._update_deps(true);
     }
 }
 
 impl Entry<StEntry> {
-    pub(in crate::core::mem) fn update_deps(&mut self, addr_bypass: &AddrBypass) {
-        let _ = addr_bypass;
-        let Some(addr_range) = self.addr_range() else {
-            return;
-        };
-        self.deps
-            .retain(|h| apply_to_handle!(&h.0, |h| check_dep!(addr_range, h)));
+    pub(in crate::core::mem) fn update_deps(&mut self) {
+        self._update_deps(false);
     }
+}
+
+fn addr_ranges_intersect(a: &Range<Addr>, b: &Range<Addr>) -> bool {
+    a.start < b.end && b.start < a.end
 }
 
 #[derive(Debug, Default)]
