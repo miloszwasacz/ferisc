@@ -1,10 +1,10 @@
 use super::{CircuitLock, Transformer};
 use std::marker::PhantomData;
 
-pub struct TransLock<F, I, O>(F, PhantomData<fn(I) -> O>);
+pub struct TransLock<I, O, F = fn(I) -> O>(F, PhantomData<fn(I) -> O>);
 
-impl<F, I, O> TransLock<F, I, O> {
-    pub(super) fn new(f: F) -> Self
+impl<I, O, F> TransLock<I, O, F> {
+    pub fn new(f: F) -> Self
     where
         F: Fn(I) -> O,
     {
@@ -18,26 +18,26 @@ impl<T: Copy> CopiedLock<'_, T> {
     }
 }
 
-impl<F, I, O> CircuitLock<'_> for TransLock<F, I, O>
+impl<I, O, F> CircuitLock<'_> for TransLock<I, O, F>
 where
     F: Fn(I) -> O,
 {
-    type Trans = Transform<F, I, O>;
+    type Trans = Transform<I, O, F>;
 
     fn make_trans(&mut self) -> Self::Trans {
         Transform(PhantomData, PhantomData)
     }
 }
 
-pub struct Transform<F, I, O>(PhantomData<F>, PhantomData<fn(I) -> O>);
+pub struct Transform<I, O, F = fn(I) -> O>(PhantomData<F>, PhantomData<fn(I) -> O>);
 
-impl<F, I, O> Transformer<'_> for Transform<F, I, O>
+impl<I, O, F> Transformer<'_> for Transform<I, O, F>
 where
     F: Fn(I) -> O,
 {
     type In = I;
     type Out = O;
-    type Lock = TransLock<F, I, O>;
+    type Lock = TransLock<I, O, F>;
 
     fn transform(&mut self, lock: &Self::Lock, input: Self::In) -> Option<Self::Out> {
         Some(lock.0(input))
@@ -46,4 +46,4 @@ where
     fn commit(self, _: &mut Self::Lock) {}
 }
 
-pub type CopiedLock<'a, T> = TransLock<fn(&'a T) -> T, &'a T, T>;
+pub type CopiedLock<'a, T> = TransLock<&'a T, T>;

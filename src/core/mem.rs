@@ -2,7 +2,7 @@
 pub use self::direct::DirectHierarchy;
 pub use self::entry::{AddrBypass, AddrBypassBuilder, AddrHandle};
 use self::entry::{Entry, LdEntry, StEntry};
-use self::locks::DispatchLock;
+use self::locks::{DispatchLock, FlushLock};
 use self::queue::Queue;
 use crate::core::{
     ee::{pipeline::BypassNetwork, rob::uop::FenceHandle},
@@ -175,6 +175,57 @@ impl<M: DMem> MemSubsystem<M> {
                 .schedule_ready(dmem, self.st_conn, &addr_bypass, prfs)
                 .or_else(|| self.ldq.schedule_ready(dmem, self.ld_conn, &addr_bypass))
         };
+    }
+
+    pub fn flush<D: DerefMut<Target = M>>(&mut self, dmem: D) -> FlushLock<'_, M, D> {
+        #[cfg(debug_assertions)]
+        assert!(
+            !self.state.intersects(State::FLUSHED),
+            "cannot flush and dispatch in the same clock cycle"
+        );
+
+        FlushLock::new(self, dmem)
+    }
+
+    pub fn flush_all(&mut self, mut dmem: impl DerefMut<Target = M>) {
+        #[cfg(debug_assertions)]
+        {
+            assert!(
+                !self.state.intersects(State::FLUSHED),
+                "cannot flush and dispatch in the same clock cycle"
+            );
+            self.state.insert(State::FLUSHED);
+        }
+
+        let dmem = dmem.deref_mut();
+        self.ldq.flush_all();
+        self.stq.flush_all();
+        self.flush_req(dmem);
+        debug_assert!(self.fence.read().get().is_none());
+    }
+
+    fn flush_req(&mut self, dmem: &mut M) {
+        match std::mem::take(&mut self.req) {
+            Req::Ld(h, s) if s.borrow().rob_entry.is_flushed() => ld_mem!(<M>::kill(dmem, h)),
+            Req::St(h, s) if s.borrow().rob_entry.is_flushed() => st_mem!(<M>::kill(dmem, h)),
+            req => {
+                self.req = req;
+            }
+        }
+    }
+}
+
+impl<M: DMem> Sequential for MemSubsystem<M> {
+    fn finish_cycle(&mut self) {
+        self.ldq.finish_cycle();
+        self.stq.finish_cycle();
+        self.fence.finish_cycle();
+
+        #[cfg(debug_assertions)]
+        {
+            use bitflags::Flags;
+            self.state.clear();
+        }
     }
 }
 

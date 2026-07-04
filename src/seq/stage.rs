@@ -39,7 +39,7 @@ impl<'a, T: CircuitLock<'a>> PipelineStage<T> {
 
     /// Adds a new infallible substage which applies a simple transformation
     /// to the elements without modifying any external state, similar to [`Iterator::map`].
-    pub fn transform<F, I, O>(self, f: F) -> PipelineStage<LockCompose<T, TransLock<F, I, O>>>
+    pub fn transform<I, O, F>(self, f: F) -> PipelineStage<LockCompose<T, TransLock<I, O, F>>>
     where
         T::Trans: Transformer<'a, Out = I>,
         F: Fn(I) -> O,

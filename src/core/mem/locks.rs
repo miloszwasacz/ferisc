@@ -187,3 +187,52 @@ impl<'a, M: DMem> Transformer<'a> for DispatchTrans<'a, M> {
 }
 
 //#endregion
+
+//#region Flush
+
+pub struct FlushLock<'a, M: DMem, D: DerefMut<Target = M>> {
+    mem: &'a mut MemSubsystem<M>,
+    dmem: D,
+}
+
+impl<'a, M: DMem, D: DerefMut<Target = M>> FlushLock<'a, M, D> {
+    pub(super) fn new(mem: &'a mut MemSubsystem<M>, dmem: D) -> Self {
+        Self { mem, dmem }
+    }
+}
+
+impl<M: DMem, D: DerefMut<Target = M>> Drop for FlushLock<'_, M, D> {
+    fn drop(&mut self) {
+        self.mem.ldq.flush();
+        self.mem.stq.flush();
+        self.mem.flush_req(self.dmem.deref_mut());
+        debug_assert!(self.mem.fence.read().is_none());
+
+        #[cfg(debug_assertions)]
+        self.mem.state.insert(super::State::FLUSHED);
+    }
+}
+
+impl<'a, M: DMem, D: DerefMut<Target = M>> CircuitLock<'a> for FlushLock<'a, M, D> {
+    type Trans = FlushTrans<'a, M, D>;
+
+    fn make_trans(&mut self) -> Self::Trans {
+        FlushTrans(PhantomData, PhantomData)
+    }
+}
+
+pub struct FlushTrans<'a, M: DMem, D>(PhantomData<&'a mut MemSubsystem<M>>, PhantomData<D>);
+
+impl<'a, M: DMem, D: DerefMut<Target = M>> Transformer<'a> for FlushTrans<'a, M, D> {
+    type In = FlushedUop;
+    type Out = FlushedUop;
+    type Lock = FlushLock<'a, M, D>;
+
+    fn transform(&mut self, _: &Self::Lock, input: Self::In) -> Option<Self::Out> {
+        Some(input)
+    }
+
+    fn commit(self, _: &mut Self::Lock) {}
+}
+
+//#endregion
