@@ -3,6 +3,7 @@ use self::locks::{DispatchLock, IssueLock};
 use crate::core::uop::issue::{Issue, TryReadReg, Uop as IUop};
 use crate::seq::{Buf, Clearable, Sequential};
 use std::collections::VecDeque;
+use std::num::NonZeroUsize;
 
 mod bypass;
 pub mod locks;
@@ -11,12 +12,22 @@ pub mod locks;
 pub struct Rs<U> {
     entries: VecDeque<IUop<U>>,
     len: Buf<usize>,
-    size: usize,
+    size: NonZeroUsize,
     #[cfg(debug_assertions)]
     state: State,
 }
 
 impl<U> Rs<U> {
+    pub fn new(config: &Config) -> Self {
+        Self {
+            entries: VecDeque::with_capacity(config.size.get()),
+            len: Buf::new(0),
+            size: config.size,
+            #[cfg(debug_assertions)]
+            state: State::empty(),
+        }
+    }
+
     pub fn dispatch(&mut self) -> DispatchLock<'_, U> {
         #[cfg(debug_assertions)]
         assert!(
@@ -58,7 +69,7 @@ impl<U> Rs<U> {
 
 impl<U> Sequential for Rs<U> {
     fn finish_cycle(&mut self) {
-        debug_assert!(self.entries.len() <= self.size);
+        debug_assert!(self.entries.len() <= self.size.get());
         self.len.write(self.entries.len());
         self.len.finish_cycle();
 
@@ -93,4 +104,9 @@ bitflags::bitflags! {
         const ISSUED = 1 << 1;
         const CLEARED = 1 << 2 | Self::DISPATCHED.bits() | Self::ISSUED.bits();
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Config {
+    pub size: NonZeroUsize,
 }

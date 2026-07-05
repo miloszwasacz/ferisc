@@ -4,7 +4,7 @@ use crate::mem::Addr;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Mepc(Addr);
 
-//TODO If IALIGN changes 32 (by writing into the MISA and disabling the C extension),
+//TODO If IALIGN changes to 32 (by writing into the MISA and disabling the C extension),
 //     the mask should clear `mepc[1:0]`, not just `mepc[0]`.
 
 impl Mepc {

@@ -24,6 +24,17 @@ pub struct Eu<U> {
 }
 
 impl<U: Execute> Eu<U> {
+    pub fn new(config: &Config) -> Self {
+        let _ = config;
+        Self {
+            uop: None,
+            new: None,
+            cycles: Default::default(),
+            #[cfg(debug_assertions)]
+            state: State::empty(),
+        }
+    }
+
     pub fn issue(
         &mut self,
         rob_lock: &mut ExecuteLock<'_, '_, '_>,
@@ -159,3 +170,6 @@ bitflags::bitflags! {
         const CLEARED = 1 << 2 | Self::ISSUED.bits() | Self::EXECUTED.bits();
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Config {}

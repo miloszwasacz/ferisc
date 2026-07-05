@@ -16,7 +16,7 @@ pub struct DispatchLock<'a, U> {
 
 impl<'a, U> DispatchLock<'a, U> {
     pub(super) fn new(rs: &'a mut Rs<U>) -> Self {
-        let free_space = rs.size - rs.len.read_copied();
+        let free_space = rs.size.get() - rs.len.read_copied();
         Self { rs, free_space }
     }
 

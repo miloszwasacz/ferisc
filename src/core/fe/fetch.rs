@@ -6,6 +6,8 @@ use crate::core::{
 };
 use crate::seq::{Sequential, locks::StageLock};
 use std::collections::VecDeque;
+use std::num::NonZeroU8;
+use std::ops::DerefMut;
 
 mod lock;
 
@@ -14,19 +16,19 @@ pub struct FetchUnit<M: IMem> {
     mem_conn: M::Conn,
     req: Option<(M::Handle, BtbPred)>,
     out_queue: VecDeque<Predecoded>,
-    pkt_width: usize,
+    pkt_width: NonZeroU8,
     flushed: bool,
     #[cfg(debug_assertions)]
     fetched: bool,
 }
 
 impl<M: IMem> FetchUnit<M> {
-    pub fn new(mem: &mut M, pkt_width: usize) -> Self {
+    pub fn new(config: &Config, mut mem: impl DerefMut<Target = M>) -> Self {
         Self {
-            mem_conn: mem.register_conn(),
+            mem_conn: mem.deref_mut().register_conn(),
             req: None,
             out_queue: VecDeque::new(),
-            pkt_width,
+            pkt_width: config.packet_width,
             flushed: false,
             #[cfg(debug_assertions)]
             fetched: false,
@@ -35,7 +37,7 @@ impl<M: IMem> FetchUnit<M> {
 
     pub fn fetch<'f>(
         &'f mut self,
-        mem: &mut M,
+        mem: impl DerefMut<Target = M>,
         addr_gen: AddrGenLock<'_>,
         predecode: PredecodeLock<'_>,
     ) -> impl StageLock<'f, (), &'f Predecoded> {
@@ -45,10 +47,10 @@ impl<M: IMem> FetchUnit<M> {
         FetchLock::new(self, mem, addr_gen, predecode)
     }
 
-    pub fn clear(&mut self, mem: &mut M) {
+    pub fn clear(&mut self, mut mem: impl DerefMut<Target = M>) {
         self.flushed = true;
         if let Some((h, _)) = self.req.take() {
-            mem.kill(h);
+            mem.deref_mut().kill(h);
         }
     }
 }
@@ -61,4 +63,9 @@ impl<M: IMem> Sequential for FetchUnit<M> {
             self.fetched = false;
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Config {
+    pub packet_width: NonZeroU8,
 }

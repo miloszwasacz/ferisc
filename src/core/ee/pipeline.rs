@@ -1,3 +1,4 @@
+pub use self::config::{Config, Configs};
 use crate::core::{
     csr::CsrFile,
     ee::{
@@ -20,6 +21,7 @@ use crate::core::{
 use crate::seq::{Clearable, IntoPipelineStage, Sequential};
 use std::cell::RefCell;
 
+mod config;
 pub mod locks;
 
 type IUop<T> = Infer<DUop, T>;
@@ -44,6 +46,17 @@ where
     DUop: InferUop<T>,
     IUop<T>: Issue<Reg = T> + Clone,
 {
+    pub fn new(config: &Config) -> Self {
+        let (prf, rat) = Prf::new(config.prf_size.get());
+        let lines = config
+            .lines
+            .iter()
+            .map(|(rs, eu)| (Rs::new(rs), Eu::new(eu)))
+            .collect();
+
+        Self { rat, prf, lines }
+    }
+
     pub fn tick<'a>(
         &'a mut self,
         rob_lock: &mut ExecuteLock<'_, '_, '_>,
@@ -110,6 +123,14 @@ pub struct Pipelines {
 }
 
 impl Pipelines {
+    pub fn new(configs: &Configs) -> Self {
+        let Configs { int } = configs;
+
+        Self {
+            int: Pipeline::new(int),
+        }
+    }
+
     pub fn tick<'a>(
         &'a mut self,
         rob: &mut RobLock<'_>,

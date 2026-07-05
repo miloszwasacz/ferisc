@@ -49,6 +49,15 @@ impl<T: Clone, P> Clone for Pbuf<T, P> {
     }
 }
 
+impl<T: Default, P> Default for Pbuf<T, P> {
+    fn default() -> Self {
+        Self {
+            buf: Default::default(),
+            new: None,
+        }
+    }
+}
+
 impl<T, P> Sequential for Pbuf<T, P> {
     fn finish_cycle(&mut self) {
         if let Some((s, _)) = self.new.take() {

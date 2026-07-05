@@ -1,13 +1,20 @@
+pub use self::config::Config;
 use self::csr::CsrFile;
 use self::ee::{
     pipeline::Pipelines,
     rob::{Rob, RobAccess},
 };
-use self::fe::{AddrGen, decode::DecodeUnit, fetch::FetchUnit, predecode::Predecoder};
+use self::fe::{
+    AddrGen,
+    decode::{DecodeUnit, Decoder, DefaultDecoder},
+    fetch::FetchUnit,
+    predecode::Predecoder,
+};
 use self::mem::{AddrBypassBuilder, MemHierarchy, MemSubsystem};
 use crate::seq::{Buf, Clearable, IntoPipelineStage, PipelineStage, Sequential};
 use std::ops::DerefMut;
 
+mod config;
 pub mod csr;
 pub mod ee;
 pub mod fe;
@@ -15,34 +22,46 @@ pub mod mem;
 pub mod reg;
 pub mod uop;
 
-pub struct Core<H: MemHierarchy> {
+pub struct Core<H: MemHierarchy, D = DefaultDecoder> {
     addr_gen: AddrGen,
     fetch: FetchUnit<H::IMem>,
     predecode: Predecoder,
-    decode: DecodeUnit,
-    pipelines: Pipelines,
+    decode: DecodeUnit<D>,
     rob: Rob,
-
+    pipelines: Pipelines,
     mem: MemSubsystem<H::DMem>,
     hier: H,
-
     csrf: CsrFile,
     mode: Buf<Mode>,
 }
 
-impl<H: MemHierarchy> Core<H> {
+impl<H: MemHierarchy, D: Decoder> Core<H, D> {
+    pub fn new(config: Config, make_mem_hier: impl FnOnce() -> H) -> Self {
+        let mut hier = make_mem_hier();
+        Self {
+            addr_gen: AddrGen::new(config.entrypoint),
+            fetch: FetchUnit::new(&config.fetch, hier.imem()),
+            predecode: Predecoder::default(),
+            decode: DecodeUnit::new(&config.decode),
+            rob: Rob::new(&config.rob),
+            pipelines: Pipelines::new(&config.pipelines),
+            mem: MemSubsystem::new(&config.mem, hier.dmem()),
+            hier,
+            csrf: CsrFile::default(),
+            mode: Buf::new(Mode::M),
+        }
+    }
+
     pub fn tick(&mut self) {
         let addr_gen = self.addr_gen.lock();
         let mode = self.mode.read_copied();
 
         //TODO Process tick
         {
-            let mut imem = self.hier.imem();
-
             // Fetch
             let fetch = self
                 .fetch
-                .fetch(imem.deref_mut(), addr_gen.clone(), self.predecode.lock());
+                .fetch(self.hier.imem(), addr_gen.clone(), self.predecode.lock());
 
             // Decode
             PipelineStage::new(fetch)
@@ -110,23 +129,27 @@ impl<H: MemHierarchy> Core<H> {
         if flush.flush_decode() {
             self.decode.clear();
         }
-
-        self.finish_cycle();
     }
 }
 
-impl<H: MemHierarchy> Sequential for Core<H> {
+impl<H: MemHierarchy, D> Sequential for Core<H, D> {
     fn finish_cycle(&mut self) {
+        self.addr_gen.finish_cycle();
         self.fetch.finish_cycle();
         self.predecode.finish_cycle();
-        todo!("finish cycle");
+        self.decode.finish_cycle();
+        self.pipelines.finish_cycle();
+        self.rob.finish_cycle();
+        self.mem.finish_cycle();
+        self.hier.finish_cycle();
+        self.csrf.finish_cycle();
+        self.mode.finish_cycle();
     }
 }
 
+//TODO More modes than machine mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum Mode {
-    //TODO More modes than machine mode
-
     // /// User mode
     // U,
     // /// Supervisor mode

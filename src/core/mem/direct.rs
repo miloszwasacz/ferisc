@@ -1,5 +1,6 @@
 use super::MemHierarchy;
 use crate::mem::Dram;
+use crate::seq::Sequential;
 use std::ops::DerefMut;
 use std::sync::{Arc, RwLock};
 
@@ -24,5 +25,11 @@ impl MemHierarchy for DirectHierarchy {
 
     fn dmem(&mut self) -> impl DerefMut<Target = Self::DMem> {
         self.dram.write().unwrap()
+    }
+}
+
+impl Sequential for DirectHierarchy {
+    fn finish_cycle(&mut self) {
+        // Do nothing - DRAM's clock should be advanced separately
     }
 }

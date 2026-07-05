@@ -5,6 +5,7 @@ use self::locks::{AccessLock, FlushAllLock, FlushLock};
 use crate::core::uop::{Exception, fence::Fence};
 use crate::seq::{Pbuf, Queue, Sequential};
 use std::cell::RefCell;
+use std::num::{NonZeroU8, NonZeroUsize};
 use std::rc::{Rc, Weak};
 
 mod entry;
@@ -23,11 +24,21 @@ pub struct Rob {
     /// might still need them until the end of the clock cycle, keeping the `Rc` alive.
     committed_fences: Vec<Rc<Fence>>,
     flush: Pbuf<Flush, FlushPriority>,
-    commit_width: usize,
-    flush_width: usize,
+    commit_width: NonZeroU8,
+    flush_width: NonZeroUsize,
 }
 
 impl Rob {
+    pub fn new(config: &Config) -> Self {
+        Self {
+            queue: Queue::new(config.size.get()),
+            committed_fences: Vec::new(),
+            flush: Default::default(),
+            commit_width: config.commit_width,
+            flush_width: config.flush_width.unwrap_or(config.size),
+        }
+    }
+
     pub fn access(&mut self) -> RobAccess<'_> {
         match self.flush.read_copied() {
             Flush::None => RobAccess::Ok(AccessLock::new(self)),
@@ -88,4 +99,11 @@ impl EntryHandle {
     pub fn throw(&mut self, exception: Exception) {
         with_entry!(self, |entry| entry.kind.write(UopKind::Except(exception)));
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Config {
+    pub size: NonZeroUsize,
+    pub commit_width: NonZeroU8,
+    pub flush_width: Option<NonZeroUsize>,
 }

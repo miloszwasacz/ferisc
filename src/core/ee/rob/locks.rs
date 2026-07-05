@@ -184,7 +184,7 @@ impl<'a, 'r: 'a, 'c, 'g, 'm> CommitLock<'a, 'c, 'g, 'm> {
     ) -> Self {
         debug_assert!(rob.0.committed_fences.is_empty());
         Self {
-            pop: rob.0.queue.pop(rob.0.commit_width),
+            pop: rob.0.queue.pop(rob.0.commit_width.get() as _),
             fences: &mut rob.0.committed_fences,
             csrf,
             addr_gen,
@@ -321,7 +321,7 @@ pub struct FlushLock<'r>(
 impl<'a> FlushLock<'a> {
     pub(super) fn new(rob: &'a mut Rob, after: usize) -> Self {
         debug_assert!(rob.committed_fences.is_empty());
-        let from = (after + 1).max(rob.queue.len() - rob.flush_width);
+        let from = (after + 1).max(rob.queue.len() - rob.flush_width.get());
         if from == after + 1 {
             rob.flush.clear();
         }

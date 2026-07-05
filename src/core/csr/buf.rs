@@ -1,6 +1,6 @@
 use crate::seq::Sequential;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CsrBuf<T> {
     val: T,
     new: New<T>,
@@ -17,6 +17,14 @@ enum New<T> {
 }
 
 impl<T> CsrBuf<T> {
+    pub fn new(val: T) -> Self {
+        Self {
+            val,
+            new: New::None,
+            implicit: None,
+        }
+    }
+
     pub fn read(&self) -> &T {
         &self.val
     }

@@ -7,7 +7,7 @@ use crate::seq::Sequential;
 use ferisc_macros::csr_file;
 
 csr_file! {
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Default)]
     #[spec_file = "spec/csr.spec"]
     pub struct CsrFile;
 }

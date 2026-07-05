@@ -2,7 +2,7 @@ use super::fcsr::Fcsr;
 use crate::core::{csr::CsrAlias, reg::int::IntVal, uop::Exception};
 use ferisc_macros::bitfields;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Fflags;
 
 bitfields! {

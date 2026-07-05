@@ -242,6 +242,9 @@ impl<'a, T: ArchReg> CircuitLock<'a> for FlushLock<'a, T> {
 
 impl<T: ArchReg> Drop for FlushLock<'_, T> {
     fn drop(&mut self) {
+        for reg in &self.deallocated {
+            self.prf.regs[*reg].write(Default::default());
+        }
         self.rat.mapping.write(self.mapping);
         self.rat
             .free_list

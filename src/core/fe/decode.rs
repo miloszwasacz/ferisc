@@ -13,6 +13,7 @@ use crate::seq::{
     Clearable, Queue, Sequential,
     locks::{LockCompose, StageLock},
 };
+use std::num::{NonZeroU8, NonZeroUsize};
 
 pub mod rv32;
 pub mod rv64;
@@ -25,23 +26,19 @@ pub struct DecodeUnit<D = DefaultDecoder> {
     decoders: Box<[D]>,
     out_queue: Queue<Uop>,
     //TODO Different IN and OUT widths
-    width: usize,
+    width: NonZeroU8,
     flushed: bool,
 }
 
 impl<D: Decoder> DecodeUnit<D> {
-    pub fn new(width: usize) -> Self {
-        Self::with_queue_size(width, width)
-    }
-
-    pub fn with_queue_size(width: usize, queue_size: usize) -> Self {
+    pub fn new(config: &Config) -> Self {
         let mut dec = Vec::new();
-        dec.resize_with(width, Default::default);
+        dec.resize_with(config.width.get() as _, Default::default);
 
         Self {
             decoders: dec.into_boxed_slice(),
-            out_queue: Queue::new(queue_size),
-            width,
+            out_queue: Queue::new(config.queue_size.unwrap_or(config.width.into()).get()),
+            width: config.width,
             flushed: false,
         }
     }
@@ -59,7 +56,7 @@ impl<D: Decoder> DecodeUnit<D> {
     }
 
     pub fn lock(&mut self) -> impl StageLock<'_, (), &Uop> {
-        self.out_queue.pop(self.width)
+        self.out_queue.pop(self.width.get() as _)
     }
 }
 
@@ -131,4 +128,10 @@ impl Decoder for DefaultDecoder {
 
         Uop { kind, addr, comp }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Config {
+    pub width: NonZeroU8,
+    pub queue_size: Option<NonZeroUsize>,
 }

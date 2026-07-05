@@ -13,6 +13,7 @@ use crate::mem::{Addr, LdReq, Mem, ReqData, StReq};
 use crate::seq::{Buf, Sequential};
 use static_assertions::const_assert_eq;
 use std::cell::RefCell;
+use std::num::NonZeroUsize;
 use std::ops::DerefMut;
 use std::rc::Rc;
 
@@ -35,7 +36,7 @@ mod queue;
 
 //#region Hierarchy
 
-pub trait MemHierarchy {
+pub trait MemHierarchy: Sequential {
     type IMem: IMem;
     type DMem: DMem;
 
@@ -93,13 +94,13 @@ impl<M: DMem> Req<M> {
 }
 
 impl<M: DMem> MemSubsystem<M> {
-    pub fn new(mut dmem: impl DerefMut<Target = M>, ldq_size: usize, stq_size: usize) -> Self {
+    pub fn new(config: &Config, mut dmem: impl DerefMut<Target = M>) -> Self {
         let dmem = dmem.deref_mut();
         Self {
             ld_conn: ld_mem!(<M>::register_conn(dmem)),
             st_conn: st_mem!(<M>::register_conn(dmem)),
-            ldq: Queue::new(ldq_size),
-            stq: Queue::new(stq_size),
+            ldq: Queue::new(config.ldq_size.get()),
+            stq: Queue::new(config.stq_size.get()),
             req: Req::None,
             fence: Buf::new(FenceHandle::detached()),
             #[cfg(debug_assertions)]
@@ -269,6 +270,12 @@ bitflags::bitflags! {
         const DISPATCHED = 1 << 0;
         const FLUSHED = 1 << 1 | Self::DISPATCHED.bits();
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Config {
+    pub ldq_size: NonZeroUsize,
+    pub stq_size: NonZeroUsize,
 }
 
 //#endregion
