@@ -173,3 +173,24 @@ bitflags::bitflags! {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Config {}
+
+#[derive(Debug, Clone)]
+pub struct Stats<U>(Option<Uop<U>>);
+
+impl<U> Stats<U> {
+    pub fn executing(&self) -> Option<&Uop<U>> {
+        self.0.as_ref()
+    }
+}
+
+impl<U: Clone> Eu<U> {
+    pub fn stats(&self) -> Stats<U> {
+        #[cfg(debug_assertions)]
+        assert!(
+            self.state.is_empty(),
+            "cannot create statistics in the middle of a clock cycle"
+        );
+
+        Stats(self.uop.clone())
+    }
+}

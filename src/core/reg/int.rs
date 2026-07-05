@@ -2,12 +2,12 @@ use super::{ArchReg, ArchRegCount, RegRepr};
 use crate::mem::Addr;
 use ferisc_macros::ArchReg;
 use std::ops::{BitAnd, BitOr, Not, Shl, Shr};
-use strum::{Display, FromRepr};
+use strum::{Display, FromRepr, VariantArray};
 
 //#region Arch
 
 /// Architectural integer register
-#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, Hash, ArchReg, FromRepr)]
+#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, Hash, ArchReg, FromRepr, VariantArray)]
 #[strum(serialize_all = "lowercase")]
 #[repr(u8)]
 pub enum IntReg {

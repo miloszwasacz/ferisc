@@ -2,7 +2,7 @@ use self::lock::DecodeLock;
 use crate::core::{
     Mode,
     csr::{CsrFile, m::misa::Mxl},
-    fe::AddrGenLock,
+    fe::addr_gen,
     uop::{
         Exception, UopKind,
         decode::Uop,
@@ -46,7 +46,7 @@ impl<D: Decoder> DecodeUnit<D> {
     pub fn decode<'a, 'g>(
         &'a mut self,
         csrf: &'a CsrFile,
-        addr_gen: AddrGenLock<'g>,
+        addr_gen: addr_gen::Lock<'g>,
         mode: Mode,
     ) -> impl StageLock<'a, &'a Predecoded, ()> {
         LockCompose::new(
@@ -134,4 +134,14 @@ impl Decoder for DefaultDecoder {
 pub struct Config {
     pub width: NonZeroU8,
     pub queue_size: Option<NonZeroUsize>,
+}
+
+#[derive(Debug, Clone, derive_more::Deref)]
+#[deref(forward)]
+pub struct Stats(Box<[Uop]>);
+
+impl<D> DecodeUnit<D> {
+    pub fn stats(&self) -> Stats {
+        Stats(self.out_queue.iter().copied().collect())
+    }
 }

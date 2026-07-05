@@ -1,6 +1,6 @@
 pub use self::addr::CsrAddr;
 pub use self::buf::CsrBuf;
-pub use self::file::CsrFile;
+pub use self::file::{CsrFile, Stats};
 use crate::core::{reg::int::IntVal, uop::Exception};
 
 macro_rules! csr_mod {

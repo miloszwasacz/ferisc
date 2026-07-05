@@ -40,7 +40,7 @@ impl<T: ArchReg> Prf<T> {
         let id = id::new_id();
         let regs = {
             let mut regs = repeat_with(PhysReg::new).take(size).collect::<Box<[_]>>();
-            if T::iter().any(|reg| reg.is_hardwired()) {
+            if T::VARIANTS.iter().any(|reg| reg.is_hardwired()) {
                 regs[HARDWIRED_IDX] = PhysReg::hardwired();
             }
             regs
@@ -133,6 +133,28 @@ impl<T> Deref for RegDest<T> {
 impl<T> DerefMut for RegDest<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.oper
+    }
+}
+
+//#endregion
+
+//#region Stats
+
+#[derive(Debug, Clone, PartialEq, Eq, derive_more::Deref)]
+#[deref(forward)]
+pub struct Stats<T: ArchReg>(Box<[Option<T::Repr>]>);
+
+impl<T: ArchReg> Prf<T> {
+    pub fn stats(&self) -> Stats<T>
+    where
+        T::Repr: Clone,
+    {
+        Stats(
+            self.regs
+                .iter()
+                .map(|reg| reg.try_read().cloned())
+                .collect(),
+        )
     }
 }
 

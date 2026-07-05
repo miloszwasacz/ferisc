@@ -1,7 +1,7 @@
 // pub use self::cached::CachedHierarchy;
 pub use self::direct::DirectHierarchy;
-pub use self::entry::{AddrBypass, AddrBypassBuilder, AddrHandle};
-use self::entry::{Entry, LdEntry, StEntry};
+use self::entry::Entry;
+pub use self::entry::{AddrBypass, AddrBypassBuilder, AddrHandle, LdEntry, StEntry};
 use self::locks::{DispatchLock, FlushLock};
 use self::queue::Queue;
 use crate::core::{
@@ -14,7 +14,7 @@ use crate::seq::{Buf, Sequential};
 use static_assertions::const_assert_eq;
 use std::cell::RefCell;
 use std::num::NonZeroUsize;
-use std::ops::DerefMut;
+use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 
 macro_rules! ld_mem {
@@ -40,8 +40,10 @@ pub trait MemHierarchy: Sequential {
     type IMem: IMem;
     type DMem: DMem;
 
-    fn imem(&mut self) -> impl DerefMut<Target = Self::IMem>;
-    fn dmem(&mut self) -> impl DerefMut<Target = Self::DMem>;
+    fn imem(&self) -> impl Deref<Target = Self::IMem>;
+    fn imem_mut(&mut self) -> impl DerefMut<Target = Self::IMem>;
+    fn dmem(&self) -> impl Deref<Target = Self::DMem>;
+    fn dmem_mut(&mut self) -> impl DerefMut<Target = Self::DMem>;
 }
 
 pub trait IMem: Mem<LdReq<Exception>, Output = Result<ReqData, Exception>> {}
@@ -276,6 +278,62 @@ bitflags::bitflags! {
 pub struct Config {
     pub ldq_size: NonZeroUsize,
     pub stq_size: NonZeroUsize,
+}
+
+#[derive(Debug, Clone)]
+pub struct Stats {
+    ldq: Box<[EntryStats<LdEntry>]>,
+    stq: Box<[EntryStats<StEntry>]>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, derive_more::Deref)]
+pub struct EntryStats<M> {
+    pub addr: Option<Addr>,
+    pub size: usize,
+    pub fenced: bool,
+    #[deref]
+    pub meta: M,
+}
+
+impl Stats {
+    pub fn loads(&self) -> &[EntryStats<LdEntry>] {
+        &self.ldq
+    }
+
+    pub fn stores(&self) -> &[EntryStats<StEntry>] {
+        &self.stq
+    }
+}
+
+impl<M: DMem> MemSubsystem<M> {
+    pub fn stats(&self) -> Stats {
+        #[cfg(debug_assertions)]
+        assert!(
+            self.state.is_empty(),
+            "cannot create statistics in the middle of a clock cycle"
+        );
+
+        macro_rules! queue_stats {
+            ($queue:expr) => {{
+                $queue
+                    .iter()
+                    .map(|s| {
+                        let e = s.borrow();
+                        EntryStats {
+                            addr: e.addr.read(),
+                            size: e.size,
+                            fenced: !e.fence.is_none(),
+                            meta: e.meta,
+                        }
+                    })
+                    .collect()
+            }};
+        }
+        Stats {
+            ldq: queue_stats!(self.ldq),
+            stq: queue_stats!(self.stq),
+        }
+    }
 }
 
 //#endregion

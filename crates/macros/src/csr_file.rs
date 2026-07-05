@@ -111,6 +111,26 @@ pub fn proc_macro(input: TokenStream) -> TokenStream {
             quote! { self.#field.finish_cycle(); }
         });
 
+    let stats_fields = spec.iter().map(|spec| {
+        let name = spec.field_name();
+        let ty = spec.name();
+        if spec.alias().is_none() {
+            quote! { pub #name: #ty, }
+        } else {
+            quote! { pub #name: <#ty as CsrAlias>::Alias, }
+        }
+    });
+    let stats = spec.iter().map(|spec| {
+        let name = spec.field_name();
+        let ty = spec.name();
+        match spec.alias() {
+            None => quote! { #name: self.#name.read().clone() },
+            Some(target) => quote! {
+                #name: <#ty as CsrAlias>::alias(self.#target.read()).clone()
+            },
+        }
+    });
+
     quote! {
         #( #attrs )*
         #vis struct #ident #where_clause {
@@ -143,6 +163,19 @@ pub fn proc_macro(input: TokenStream) -> TokenStream {
         impl Sequential for #ident #where_clause {
             fn finish_cycle(&mut self) {
                 #( #finish_cycle )*
+            }
+        }
+
+        #[derive(Debug, Clone)]
+        #vis struct Stats {
+            #( #stats_fields )*
+        }
+
+        impl #ident #where_clause {
+            pub fn stats(&self) -> Stats {
+                Stats {
+                    #( #stats ),*
+                }
             }
         }
 

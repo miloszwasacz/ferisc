@@ -5,16 +5,19 @@ use self::ee::{
     rob::{Rob, RobAccess},
 };
 use self::fe::{
-    AddrGen,
+    addr_gen::AddrGen,
     decode::{DecodeUnit, Decoder, DefaultDecoder},
     fetch::FetchUnit,
     predecode::Predecoder,
 };
 use self::mem::{AddrBypassBuilder, MemHierarchy, MemSubsystem};
+pub use self::stats::Stats;
 use crate::seq::{Buf, Clearable, IntoPipelineStage, PipelineStage, Sequential};
 use std::ops::DerefMut;
 
 mod config;
+mod stats;
+
 pub mod csr;
 pub mod ee;
 pub mod fe;
@@ -40,12 +43,12 @@ impl<H: MemHierarchy, D: Decoder> Core<H, D> {
         let mut hier = make_mem_hier();
         Self {
             addr_gen: AddrGen::new(config.entrypoint),
-            fetch: FetchUnit::new(&config.fetch, hier.imem()),
+            fetch: FetchUnit::new(&config.fetch, hier.imem_mut()),
             predecode: Predecoder::default(),
             decode: DecodeUnit::new(&config.decode),
             rob: Rob::new(&config.rob),
             pipelines: Pipelines::new(&config.pipelines),
-            mem: MemSubsystem::new(&config.mem, hier.dmem()),
+            mem: MemSubsystem::new(&config.mem, hier.dmem_mut()),
             hier,
             csrf: CsrFile::default(),
             mode: Buf::new(Mode::M),
@@ -59,9 +62,11 @@ impl<H: MemHierarchy, D: Decoder> Core<H, D> {
         //TODO Process tick
         {
             // Fetch
-            let fetch = self
-                .fetch
-                .fetch(self.hier.imem(), addr_gen.clone(), self.predecode.lock());
+            let fetch = self.fetch.fetch(
+                self.hier.imem_mut(),
+                addr_gen.clone(),
+                self.predecode.lock(),
+            );
 
             // Decode
             PipelineStage::new(fetch)
@@ -94,7 +99,7 @@ impl<H: MemHierarchy, D: Decoder> Core<H, D> {
 
                 // Memory Access
                 self.mem
-                    .tick(self.hier.dmem(), addr_bypass.build(), &mut bypass);
+                    .tick(self.hier.dmem_mut(), addr_bypass.build(), &mut bypass);
 
                 // Commit
                 rob.commit(&mut self.csrf, addr_gen.clone(), &mut self.mode)
@@ -106,13 +111,13 @@ impl<H: MemHierarchy, D: Decoder> Core<H, D> {
                 flush
                     .into_pipeline_stage()
                     .substage(self.pipelines.flush())
-                    .substage(self.mem.flush(self.hier.dmem()))
+                    .substage(self.mem.flush(self.hier.dmem_mut()))
                     .transform(|_| ())
                     .execute();
             }
             RobAccess::FlushAll(_) => {
                 self.pipelines.clear();
-                self.mem.flush_all(self.hier.dmem());
+                self.mem.flush_all(self.hier.dmem_mut());
             }
         }
 
@@ -123,7 +128,7 @@ impl<H: MemHierarchy, D: Decoder> Core<H, D> {
         //TODO How to update BTB and BP when flushing?
         let flush = addr_gen.apply();
         if flush.flush_fetch() {
-            self.fetch.clear(self.hier.imem().deref_mut());
+            self.fetch.clear(self.hier.imem_mut().deref_mut());
             self.predecode.clear();
         }
         if flush.flush_decode() {

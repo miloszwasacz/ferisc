@@ -3,6 +3,7 @@ use self::flush::{Flush, FlushPriority};
 pub use self::flush::{Uop as FlushedUop, UopKind as FlushedUopKind};
 use self::locks::{AccessLock, FlushAllLock, FlushLock};
 use crate::core::uop::{Exception, fence::Fence};
+use crate::mem::Addr;
 use crate::seq::{Pbuf, Queue, Sequential};
 use std::cell::RefCell;
 use std::num::{NonZeroU8, NonZeroUsize};
@@ -106,4 +107,31 @@ pub struct Config {
     pub size: NonZeroUsize,
     pub commit_width: NonZeroU8,
     pub flush_width: Option<NonZeroUsize>,
+}
+
+#[derive(Debug, Clone, derive_more::Deref)]
+#[deref(forward)]
+pub struct Stats(Box<[EntryStats]>);
+
+#[derive(Debug, Clone)]
+pub struct EntryStats {
+    pub kind: UopKind<()>,
+    pub addr: Addr,
+}
+
+impl Rob {
+    pub fn stats(&self) -> Stats {
+        Stats(
+            self.queue
+                .iter()
+                .map(|s| {
+                    let e = s.borrow();
+                    EntryStats {
+                        kind: e.kind.read().into(),
+                        addr: e.addr,
+                    }
+                })
+                .collect(),
+        )
+    }
 }

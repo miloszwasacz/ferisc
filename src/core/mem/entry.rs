@@ -65,8 +65,8 @@ impl<M> DerefMut for Entry<M> {
 
 //#region Load
 
-#[derive(Debug, Clone)]
-pub(super) struct LdEntry {
+#[derive(Debug, Clone, Copy)]
+pub struct LdEntry {
     pub signed: bool,
     pub dest: Dest,
 }
@@ -75,13 +75,13 @@ pub(super) struct LdEntry {
 
 //#region Store
 
-#[derive(Debug, Clone)]
-pub(super) struct StEntry {
+#[derive(Debug, Clone, Copy)]
+pub struct StEntry {
     pub src: Src,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(super) enum Src {
+pub enum Src {
     Int(RegOper<IntReg>),
 }
 

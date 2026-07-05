@@ -1,6 +1,6 @@
 use super::FetchUnit;
 use crate::core::{
-    fe::{AddrGenLock, predecode::PredecodeLock},
+    fe::{addr_gen, predecode::PredecodeLock},
     mem::IMem,
     uop::{fetch::FetchPacket, predecode::Predecoded},
 };
@@ -22,7 +22,7 @@ where
 {
     unit: *mut FetchUnit<M>,
     mem: D,
-    addr_gen: AddrGenLock<'g>,
+    addr_gen: addr_gen::Lock<'g>,
     predecode: PredecodeLock<'d>,
     iter: Iter<'u, Predecoded>,
     popped: usize,
@@ -37,7 +37,7 @@ where
     pub(super) fn new(
         unit: &'u mut FetchUnit<M>,
         mem: D,
-        addr_gen: AddrGenLock<'g>,
+        addr_gen: addr_gen::Lock<'g>,
         predecode: PredecodeLock<'d>,
     ) -> FetchLock<'u, 'g, 'd, M, D> {
         Self(Some(LockImpl {

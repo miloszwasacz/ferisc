@@ -1,4 +1,4 @@
-use super::{Mapping, Rat, State, free_list::AllocLock};
+use super::{Mapping, Rat, free_list::AllocLock};
 use crate::core::{
     reg::{
         ArchReg,
@@ -139,7 +139,7 @@ where
         }
 
         #[cfg(debug_assertions)]
-        lock.rat.state.insert(State::RENAMED);
+        lock.rat.state.insert(super::State::RENAMED);
     }
 }
 
@@ -182,7 +182,7 @@ impl<T: ArchReg> Drop for CommitLock<'_, T> {
             .deallocate(std::mem::take(&mut self.deallocated));
 
         #[cfg(debug_assertions)]
-        self.rat.state.insert(State::COMMITTED);
+        self.rat.state.insert(super::State::COMMITTED);
     }
 }
 
@@ -251,7 +251,7 @@ impl<T: ArchReg> Drop for FlushLock<'_, T> {
             .deallocate(std::mem::take(&mut self.deallocated));
 
         #[cfg(debug_assertions)]
-        self.rat.state.insert(State::FLUSHED);
+        self.rat.state.insert(super::State::FLUSHED);
     }
 }
 

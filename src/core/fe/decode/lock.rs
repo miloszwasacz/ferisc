@@ -2,7 +2,7 @@ use super::Decoder;
 use crate::core::{
     Mode,
     csr::CsrFile,
-    fe::AddrGenLock,
+    fe::addr_gen,
     uop::{
         decode::{Uop, UopKind, int},
         predecode::Predecoded,
@@ -16,7 +16,7 @@ use std::slice::Iter;
 pub struct DecodeLock<'a, 'g, D> {
     decoders: Option<Iter<'a, D>>,
     csrf: &'a CsrFile,
-    addr_gen: AddrGenLock<'g>,
+    addr_gen: addr_gen::Lock<'g>,
     mode: Mode,
 }
 
@@ -24,7 +24,7 @@ impl<'a, 'g, D> DecodeLock<'a, 'g, D> {
     pub(super) fn new(
         decoders: &'a mut [D],
         csrf: &'a CsrFile,
-        addr_gen: AddrGenLock<'g>,
+        addr_gen: addr_gen::Lock<'g>,
         mode: Mode,
     ) -> Self {
         Self {
@@ -51,7 +51,7 @@ impl<'a, 'g, D: Decoder + 'a> CircuitLock<'a> for DecodeLock<'a, 'g, D> {
 pub struct DecodeTrans<'a, 'g, D> {
     decoder: Option<&'a D>,
     jump: Option<Addr>,
-    _addr_gen: PhantomData<AddrGenLock<'g>>,
+    _addr_gen: PhantomData<addr_gen::Lock<'g>>,
 }
 
 impl<'a, 'g, D: Decoder + 'a> Transformer<'a> for DecodeTrans<'a, 'g, D> {

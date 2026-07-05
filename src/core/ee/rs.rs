@@ -110,3 +110,24 @@ bitflags::bitflags! {
 pub struct Config {
     pub size: NonZeroUsize,
 }
+
+#[derive(Debug, Clone)]
+pub struct Stats<U>(VecDeque<IUop<U>>);
+
+impl<U> Stats<U> {
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = &IUop<U>> + DoubleEndedIterator {
+        self.0.iter()
+    }
+}
+
+impl<U: Clone> Rs<U> {
+    pub fn stats(&self) -> Stats<U> {
+        #[cfg(debug_assertions)]
+        assert!(
+            self.state.is_empty(),
+            "cannot create statistics in the middle of a clock cycle"
+        );
+
+        Stats(self.entries.clone())
+    }
+}

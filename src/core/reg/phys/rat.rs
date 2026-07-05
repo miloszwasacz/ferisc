@@ -3,7 +3,7 @@ use self::locks::{CommitLock, FlushLock, RenameLock};
 use super::{Prf, RegIdx};
 use crate::core::reg::ArchReg;
 use crate::seq::{Buf, Sequential};
-use bitflags::bitflags;
+use generic_array::functional::FunctionalSequence;
 use generic_array::{ArrayLength, GenericArray};
 use std::ops::{Deref, DerefMut, Index, IndexMut};
 
@@ -136,12 +136,69 @@ impl<T: ArchReg> Sequential for Rat<T> {
 }
 
 #[cfg(debug_assertions)]
-bitflags! {
+bitflags::bitflags! {
     #[derive(Debug, Clone, Copy)]
     struct State: u8 {
         const RENAMED = 1 << 0;
         const COMMITTED = 1 << 1;
         const FLUSHED = (1 << 2) | Self::RENAMED.bits() | Self::COMMITTED.bits();
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Stats<T: ArchReg> {
+    speculative: GenericArray<(T, Option<T::Repr>), T::COUNT>,
+    committed: GenericArray<(T, Option<T::Repr>), T::COUNT>,
+}
+
+impl<T> Clone for Stats<T>
+where
+    T: ArchReg,
+    T::Repr: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            speculative: self.speculative.clone(),
+            committed: self.committed.clone(),
+        }
+    }
+}
+
+impl<T> Copy for Stats<T>
+where
+    T: ArchReg,
+    T::Repr: Copy,
+    <T::COUNT as ArrayLength>::ArrayType<(T, Option<T::Repr>)>: Copy,
+{
+}
+
+impl<T: ArchReg> Stats<T> {
+    pub fn speculative(&self) -> &[(T, Option<T::Repr>)] {
+        self.speculative.as_slice()
+    }
+
+    pub fn committed(&self) -> &[(T, Option<T::Repr>)] {
+        self.committed.as_slice()
+    }
+}
+
+impl<T: ArchReg> Rat<T> {
+    pub fn stats(&self, prf: &Prf<T>) -> Stats<T>
+    where
+        T: Clone,
+        T::Repr: Clone,
+    {
+        let variants = GenericArray::<_, T::COUNT>::from_slice(T::VARIANTS);
+        let map = |mapping: &Buf<Mapping<RegIdx, _>>| {
+            mapping.read_copied().zip(variants, |idx, reg| {
+                (*reg, prf.regs[idx].try_read().cloned())
+            })
+        };
+
+        Stats {
+            speculative: map(&self.mapping),
+            committed: map(&self.committed),
+        }
     }
 }
 

@@ -1,7 +1,7 @@
 use super::MemHierarchy;
 use crate::mem::Dram;
 use crate::seq::Sequential;
-use std::ops::DerefMut;
+use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, RwLock};
 
 #[derive(Debug)]
@@ -19,11 +19,19 @@ impl MemHierarchy for DirectHierarchy {
     type IMem = Dram;
     type DMem = Dram;
 
-    fn imem(&mut self) -> impl DerefMut<Target = Self::IMem> {
+    fn imem(&self) -> impl Deref<Target = Self::IMem> {
+        self.dram.read().unwrap()
+    }
+
+    fn imem_mut(&mut self) -> impl DerefMut<Target = Self::IMem> {
         self.dram.write().unwrap()
     }
 
-    fn dmem(&mut self) -> impl DerefMut<Target = Self::DMem> {
+    fn dmem(&self) -> impl Deref<Target = Self::DMem> {
+        self.dram.read().unwrap()
+    }
+
+    fn dmem_mut(&mut self) -> impl DerefMut<Target = Self::DMem> {
         self.dram.write().unwrap()
     }
 }

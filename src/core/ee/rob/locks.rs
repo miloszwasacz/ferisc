@@ -2,7 +2,7 @@ use super::{EntryHandle, Flush, FlushPriority, FlushedUop, Rob, Slot, UopKind, u
 use crate::core::{
     Mode,
     csr::{CsrAddr, CsrFile},
-    fe::AddrGenLock,
+    fe::addr_gen,
     reg::int::Uint,
     uop::{Exception, commit::Dest, fence::Fence, rename},
 };
@@ -36,7 +36,7 @@ impl<'r> AccessLock<'r> {
         DispatchLock::new(self)
     }
 
-    pub fn execute<'a, 'g>(&'a mut self, addr_gen: AddrGenLock<'g>) -> ExecuteLock<'a, 'r, 'g>
+    pub fn execute<'a, 'g>(&'a mut self, addr_gen: addr_gen::Lock<'g>) -> ExecuteLock<'a, 'r, 'g>
     where
         'r: 'a,
     {
@@ -46,7 +46,7 @@ impl<'r> AccessLock<'r> {
     pub fn commit<'a>(
         &'a mut self,
         csrf: &mut CsrFile,
-        addr_gen: AddrGenLock<'_>,
+        addr_gen: addr_gen::Lock<'_>,
         mode: &mut Buf<Mode>,
     ) -> impl StageLock<'a, (), Option<Dest>>
     where
@@ -101,12 +101,12 @@ impl<'a> Transformer<'a> for DispatchTrans {
 
 pub struct ExecuteLock<'a, 'r, 'g> {
     rob: &'a mut AccessLock<'r>,
-    addr_gen: AddrGenLock<'g>,
+    addr_gen: addr_gen::Lock<'g>,
     cause: Option<(Addr, usize)>,
 }
 
 impl<'a, 'r: 'a, 'g> ExecuteLock<'a, 'r, 'g> {
-    fn new(rob: &'a mut AccessLock<'r>, addr_gen: AddrGenLock<'g>) -> Self {
+    fn new(rob: &'a mut AccessLock<'r>, addr_gen: addr_gen::Lock<'g>) -> Self {
         Self {
             rob,
             addr_gen,
@@ -168,7 +168,7 @@ pub struct CommitLock<'r, 'c, 'g, 'm> {
     pop: PopLock<'r, Slot>,
     fences: &'r mut Vec<Rc<Fence>>,
     csrf: &'c mut CsrFile,
-    addr_gen: AddrGenLock<'g>,
+    addr_gen: addr_gen::Lock<'g>,
     mode: &'m mut Buf<Mode>,
     flush: &'r mut Pbuf<Flush, FlushPriority>,
     count: Uint,
@@ -179,7 +179,7 @@ impl<'a, 'r: 'a, 'c, 'g, 'm> CommitLock<'a, 'c, 'g, 'm> {
     fn new(
         rob: &'a mut AccessLock<'r>,
         csrf: &'c mut CsrFile,
-        addr_gen: AddrGenLock<'g>,
+        addr_gen: addr_gen::Lock<'g>,
         mode: &'m mut Buf<Mode>,
     ) -> Self {
         debug_assert!(rob.0.committed_fences.is_empty());

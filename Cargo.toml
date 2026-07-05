@@ -22,6 +22,7 @@ derive_more = { version = "2.1.1", features = ["debug", "deref", "deref_mut"] }
 generic-array = "1.4.3"
 bitflags = "2.13.0"
 paste = { workspace = true }
+const_format = "0.2.36"
 static_assertions = "1.1.0"
 
 [build-dependencies]

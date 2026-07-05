@@ -1,14 +1,12 @@
 use generic_array::ArrayLength;
 use std::hash::Hash;
+use strum::VariantArray;
 
 pub mod int;
 pub mod phys;
 
 /// Architectural registers as defined by the ISA.
-pub trait ArchReg: RegRepr + ArchRegCount + Copy + Eq + Hash + Into<usize> {
-    /// Returns an iterator of all available architectural registers.
-    fn iter() -> impl Iterator<Item = Self>;
-
+pub trait ArchReg: RegRepr + ArchRegCount + Copy + Eq + Hash + Into<usize> + VariantArray {
     /// Returns whether an architectural register is hardwired.
     fn is_hardwired(&self) -> bool;
 }

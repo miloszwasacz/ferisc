@@ -20,7 +20,7 @@ pub struct FreeList {
 impl FreeList {
     pub fn new<T: ArchReg>(prf_size: usize, mapping: &mut GenericArray<RegIdx, T::COUNT>) -> Self {
         let mut queue = (FIRST_IDX..prf_size).collect::<Queue>();
-        for (i, reg) in T::iter().enumerate() {
+        for (i, reg) in T::VARIANTS.iter().enumerate() {
             if !reg.is_hardwired() {
                 mapping[i] = queue
                     .pop_back()
@@ -70,7 +70,7 @@ impl FreeList {
             self.state.insert(super::State::FLUSHED);
         }
 
-        let any_hardwired = T::iter().any(|reg| reg.is_hardwired());
+        let any_hardwired = T::VARIANTS.iter().any(|reg| reg.is_hardwired());
         let mapping = {
             let mut sorted = *mapping;
             sorted.sort();

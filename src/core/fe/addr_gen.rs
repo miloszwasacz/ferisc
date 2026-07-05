@@ -16,8 +16,8 @@ impl AddrGen {
         }
     }
 
-    pub fn lock(&mut self) -> AddrGenLock<'_> {
-        AddrGenLock(Rc::new(RefCell::new(AddrGenLockImpl {
+    pub fn lock(&mut self) -> Lock<'_> {
+        Lock(Rc::new(RefCell::new(AddrGenLockImpl {
             addr_gen: self,
             mux: Mux::None,
             target: Default::default(),
@@ -33,6 +33,19 @@ impl Sequential for AddrGen {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stats {
+    pub next_pc: Addr,
+}
+
+impl AddrGen {
+    pub fn stats(&self) -> Stats {
+        Stats {
+            next_pc: self.next_pc.read_copied(),
+        }
+    }
+}
+
 // Addr gen needs info from:
 // - interrupts
 // - commit -> exceptions
@@ -45,7 +58,7 @@ impl Sequential for AddrGen {
 //#region Lock
 
 #[derive(Debug, Clone)]
-pub struct AddrGenLock<'a>(Rc<RefCell<AddrGenLockImpl<'a>>>);
+pub struct Lock<'a>(Rc<RefCell<AddrGenLockImpl<'a>>>);
 
 #[derive(Debug)]
 struct AddrGenLockImpl<'a> {
@@ -64,7 +77,7 @@ macro_rules! add_input {
     }};
 }
 
-impl<'a> AddrGenLock<'a> {
+impl<'a> Lock<'a> {
     pub fn next_pc(&self) -> Addr {
         self.0.borrow().addr_gen.next_pc.read_copied()
     }

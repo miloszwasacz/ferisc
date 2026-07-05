@@ -1,4 +1,5 @@
 pub use self::config::{Config, Configs};
+pub use self::stats::{AllStats, Stats};
 use crate::core::{
     csr::CsrFile,
     ee::{
@@ -6,7 +7,7 @@ use crate::core::{
         rob::locks::{AccessLock as RobLock, ExecuteLock},
         rs::{self, Rs},
     },
-    fe::AddrGenLock,
+    fe::addr_gen,
     mem::AddrBypassBuilder,
     reg::{
         ArchReg,
@@ -23,6 +24,7 @@ use std::cell::RefCell;
 
 mod config;
 pub mod locks;
+mod stats;
 
 type IUop<T> = Infer<DUop, T>;
 type EUop<T> = <IUop<T> as Issue>::Issued;
@@ -136,7 +138,7 @@ impl Pipelines {
         rob: &mut RobLock<'_>,
         addr_bypass: &mut AddrBypassBuilder,
         csrf: &mut CsrFile,
-        addr_gen: AddrGenLock<'_>,
+        addr_gen: addr_gen::Lock<'_>,
     ) -> BypassNetwork<'a> {
         let Self { int } = self;
         let mut rob_lock = rob.execute(addr_gen);

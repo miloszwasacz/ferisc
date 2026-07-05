@@ -6,7 +6,6 @@ pub fn derive(input: TokenStream) -> TokenStream {
     let item = parse_macro_input!(input as syn::ItemEnum);
     let name = &item.ident;
     let count = item.variants.len();
-    let all = item.variants.iter().map(|v| &v.ident);
     let hardwired = item
         .variants
         .iter()
@@ -33,12 +32,6 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
     quote! {
         impl ArchReg for #name {
-            fn iter() -> impl ::core::iter::Iterator<Item = Self> {
-                [
-                    #( Self::#all, )*
-                ].into_iter()
-            }
-
             fn is_hardwired(&self) -> bool {
                 match self {
                     #( Self::#hardwired => true, )*
