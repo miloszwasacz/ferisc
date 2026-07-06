@@ -94,7 +94,7 @@ where
         }
 
         let mem = mem.deref_mut();
-        let req = unit
+        let (req, addr) = unit
             .req
             .take()
             .and_then(|(h, pred)| {
@@ -105,17 +105,18 @@ where
                         unit.out_queue = predecode.transform(FetchPacket { addr, bytes, pred });
                         None
                     }
-                    Err(h) => Some((h, pred)),
+                    Err(h) => Some(((h, pred), addr)),
                 }
             })
             .unwrap_or_else(|| {
-                let req = LdReq::new(addr_gen.next_pc(), unit.pkt_width.get() as _);
+                let addr = addr_gen.next_pc();
+                let req = LdReq::new(addr, unit.pkt_width.get() as _);
                 let h = mem.req(req, unit.mem_conn);
                 //TODO BTB prediction
-                (h, None)
+                ((h, None), addr)
             });
 
-        let next_pc = mem.req_addr(&req.0) + unit.pkt_width.get() as Addr;
+        let next_pc = addr + unit.pkt_width.get() as Addr;
         addr_gen.fetch(next_pc);
         unit.req = Some(req);
         #[cfg(debug_assertions)]
