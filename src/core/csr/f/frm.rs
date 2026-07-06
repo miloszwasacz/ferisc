@@ -1,11 +1,12 @@
 use super::fcsr::Fcsr;
 use crate::core::{csr::CsrAlias, reg::int::IntVal, uop::Exception};
+use num_enum::IntoPrimitive;
 use strum::FromRepr;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Frm;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, FromRepr)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive, FromRepr)]
 #[repr(u8)]
 pub enum Rm {
     /// Round to Nearest, ties to Even

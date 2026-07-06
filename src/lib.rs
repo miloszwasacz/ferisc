@@ -11,3 +11,6 @@ macro_rules! include_generated {
 pub mod core;
 pub mod mem;
 pub mod seq;
+
+#[cfg(feature = "tui")]
+pub mod tui;

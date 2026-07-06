@@ -98,7 +98,7 @@ impl RegRepr for IntReg {
     type Repr = IntVal;
 
     fn decode(enc: i32) -> Option<Self> {
-        Self::from_repr(enc as _)
+        Self::from_repr(enc.try_into().ok()?)
     }
 }
 

@@ -29,9 +29,24 @@ pub struct Dram {
 }
 
 impl Dram {
-    pub fn new(size: usize) -> Self {
+    //TODO Better API for loading the binary
+    pub fn new<'a>(
+        size: usize,
+        elf: elf::ElfBytes<'a, elf::endian::LittleEndian>,
+        elf_data: &'a [u8],
+    ) -> Self {
+        let mut mem = vec![0; size].into_boxed_slice();
+        //TODO Proper error handling
+        for s in elf.segments().unwrap() {
+            let offset = s.p_offset as usize;
+            let addr = s.p_paddr as usize;
+            let size = s.p_filesz.min(s.p_memsz) as usize;
+
+            mem[addr..addr + size].copy_from_slice(&elf_data[offset..offset + size]);
+        }
+
         Self {
-            mem: Box::into_pin(vec![0; size].into_boxed_slice()),
+            mem: Box::into_pin(mem),
             ld_reqs: (Vec::new(), 0),
             st_reqs: (Vec::new(), 0),
         }
