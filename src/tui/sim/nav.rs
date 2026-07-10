@@ -1,6 +1,10 @@
-use ratatui::layout::Flex;
-use ratatui::macros::line;
-use ratatui::prelude::*;
+use const_format::concatcp;
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::style::Stylize;
+use ratatui::symbols;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::Widget;
 use std::borrow::Cow;
 use std::collections::VecDeque;
 
@@ -23,16 +27,13 @@ impl NavItem {
             desc: desc.into(),
         }
     }
-}
 
-impl Widget for NavItem {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        line![
+    pub fn into_spans(self) -> impl IntoIterator<Item = Span<'static>> {
+        [
             Span::raw(self.action).cyan(),
             Span::raw(" "),
-            Span::raw(self.desc)
+            Span::raw(self.desc),
         ]
-        .render(area, buf);
     }
 }
 
@@ -55,26 +56,15 @@ pub struct NavInfo(VecDeque<NavItem>);
 
 impl Widget for NavInfo {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let mut width = 0;
-        let layout = Layout::horizontal(
-            self.0
-                .iter()
-                .map(|l| l.action.len() + 1 + l.desc.len())
-                .inspect(|w| width += w)
-                .map(|w| Constraint::Length(w as _)),
-        )
-        .flex(Flex::Start)
-        .spacing(
-            (2..=5)
-                .rev()
-                .find(|w| (width + self.0.len() * w) <= area.width as usize)
-                .unwrap_or(1) as i32,
-        )
-        .split(area);
-
-        for (item, area) in self.0.into_iter().zip(layout.as_ref()) {
-            item.render(*area, buf);
-        }
+        self.0
+            .into_iter()
+            .flat_map(|item| {
+                let spacer = Span::raw(concatcp!(" ", symbols::DOT, " ")).dark_gray();
+                std::iter::once(spacer).chain(item.into_spans())
+            })
+            .skip(1)
+            .collect::<Line>()
+            .render(area, buf);
     }
 }
 

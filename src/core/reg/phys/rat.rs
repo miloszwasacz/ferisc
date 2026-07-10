@@ -148,7 +148,7 @@ bitflags::bitflags! {
 #[derive(Debug, PartialEq, Eq)]
 pub struct Stats<T: ArchReg> {
     speculative: GenericArray<(T, Option<T::Repr>), T::COUNT>,
-    committed: GenericArray<(T, Option<T::Repr>), T::COUNT>,
+    committed: GenericArray<(T, T::Repr), T::COUNT>,
 }
 
 impl<T> Clone for Stats<T>
@@ -169,6 +169,7 @@ where
     T: ArchReg,
     T::Repr: Copy,
     <T::COUNT as ArrayLength>::ArrayType<(T, Option<T::Repr>)>: Copy,
+    <T::COUNT as ArrayLength>::ArrayType<(T, T::Repr)>: Copy,
 {
 }
 
@@ -177,7 +178,7 @@ impl<T: ArchReg> Stats<T> {
         self.speculative.as_slice()
     }
 
-    pub fn committed(&self) -> &[(T, Option<T::Repr>)] {
+    pub fn committed(&self) -> &[(T, T::Repr)] {
         self.committed.as_slice()
     }
 }
@@ -197,7 +198,8 @@ impl<T: ArchReg> Rat<T> {
 
         Stats {
             speculative: map(&self.mapping),
-            committed: map(&self.committed),
+            committed: map(&self.committed)
+                .map(|(reg, v)| (reg, v.expect("committed register should not be busy"))),
         }
     }
 }

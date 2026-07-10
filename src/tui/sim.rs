@@ -1,18 +1,17 @@
 use self::dashboard::Dashboard;
 use self::nav::NavInfoBuilder;
-use crate::core::{Config, Core, Stats, mem::DirectHierarchy};
+use crate::core::{Config, Core, mem::DirectHierarchy};
 use crate::mem::Dram;
 use crate::seq::Sequential;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use num_enum::IntoPrimitive;
-use ratatui::layout::Offset;
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
 use ratatui::macros::vertical;
-use ratatui::prelude::*;
 use ratatui::symbols;
 use ratatui::text::ToLine;
-use ratatui::widgets::{Block, BorderType, Tabs};
+use ratatui::widgets::{StatefulWidget, Tabs, Widget};
 use std::sync::{Arc, RwLock};
-use strum::{Display, FromRepr, VariantArray};
+use strum::{Display, VariantArray};
 
 mod dashboard;
 mod nav;
@@ -49,24 +48,12 @@ impl Sim {
 
     pub fn handle_event(&mut self, event: KeyEvent) -> EventResult {
         match event {
-            KeyEvent {
-                code: KeyCode::Esc,
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => EventResult::Quit,
-            KeyEvent {
-                code: KeyCode::Tab,
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => {
+            key_event!(KeyCode::Esc) => EventResult::Quit,
+            key_event!(KeyCode::Tab) => {
                 self.tabs = self.tabs.next();
                 EventResult::Ok
             }
-            KeyEvent {
-                code: KeyCode::BackTab,
-                modifiers: KeyModifiers::SHIFT,
-                ..
-            } => {
+            key_event!(KeyCode::BackTab, KeyModifiers::SHIFT) => {
                 self.tabs = self.tabs.prev();
                 EventResult::Ok
             }
@@ -78,13 +65,35 @@ impl Sim {
                         self.core.finish_cycle();
                         self.mem.write().unwrap().finish_cycle();
 
-                        self.dashboard = Dashboard::new(self.core.stats());
+                        self.dashboard.update(self.core.stats());
                         EventResult::Ok
                     }
                 },
                 TabState::Csrf => todo!(),
             },
         }
+    }
+
+    fn render_tabs(&self, area: Rect, buf: &mut Buffer, nav: &mut NavInfoBuilder) {
+        nav.push_back(("Tab", "Change tab"));
+
+        let content_area = Rect {
+            y: area.y + 2,
+            height: area.height - 2,
+            ..area
+        };
+        match self.tabs {
+            TabState::Dashboard => self.dashboard.render(content_area, buf, nav),
+            TabState::Csrf => {
+                //TODO CSRs
+            }
+        }
+
+        //TODO Prettier tabs
+        Tabs::new(TabState::VARIANTS.iter().map(|v| v.to_line()))
+            .select(self.tabs as usize)
+            .divider(symbols::DOT)
+            .render(area, buf);
     }
 }
 
@@ -94,9 +103,7 @@ impl Widget for &Sim {
 
         let mut nav = NavInfoBuilder::new();
         nav.push_back(("Esc", "Quit"));
-
-        render_tabs(self.core.stats(), tabs_area, buf, self.tabs, &mut nav);
-
+        self.render_tabs(tabs_area, buf, &mut nav);
         nav.build().render(nav_area, buf);
     }
 }
@@ -110,54 +117,15 @@ pub enum EventResult {
 
 //#region Tabs
 
-#[derive(
-    Debug, Display, Clone, Copy, PartialEq, Eq, Hash, Default, VariantArray, FromRepr, IntoPrimitive,
-)]
-#[repr(u8)]
-enum TabState {
-    #[default]
-    Dashboard = 0,
-    #[strum(to_string = "CSRs")]
-    Csrf,
-}
-
-impl TabState {
-    pub fn next(self) -> Self {
-        const FIRST: TabState = TabState::VARIANTS.first().copied().unwrap();
-
-        Self::from_repr(u8::from(self).wrapping_add(1)).unwrap_or(FIRST)
+focus_state! {
+    #[repr(u8)]
+    #[derive(Debug, Display, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    enum TabState {
+        #[default]
+        Dashboard = 0,
+        #[strum(to_string = "CSRs")]
+        Csrf,
     }
-
-    pub fn prev(self) -> Self {
-        const LAST: TabState = TabState::VARIANTS.last().copied().unwrap();
-
-        Self::from_repr(u8::from(self).wrapping_sub(1)).unwrap_or(LAST)
-    }
-}
-
-fn render_tabs(
-    stats: Stats,
-    area: Rect,
-    buf: &mut Buffer,
-    state: TabState,
-    nav: &mut NavInfoBuilder,
-) {
-    nav.push_back(("Tab", "Change tab"));
-
-    let block = Block::bordered().border_type(BorderType::Rounded);
-    match state {
-        TabState::Dashboard => Dashboard::new(stats).render(block.inner(area), buf, nav),
-        TabState::Csrf => {
-            //TODO CSRs
-        }
-    }
-    block.render(area, buf);
-
-    Tabs::new(TabState::VARIANTS.iter().map(|v| v.to_line()))
-        .select(state as usize)
-        .divider(symbols::line::HORIZONTAL)
-        .padding("", "")
-        .render(area + Offset::new(2, 0), buf);
 }
 
 //#endregion
