@@ -1,0 +1,128 @@
+use ratatui::layout::{Position, Size};
+
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Hash)]
+pub struct ScrollViewState {
+    /// The offset is the number of rows and columns to shift the scroll view by.
+    pub(super) offset: Position,
+    /// The size of the scroll view. Not set until the first render call.
+    pub(super) size: Option<Size>,
+    /// The size of a page of the scroll view. Not set until the first render call.
+    pub(super) page_size: Option<Size>,
+}
+
+impl ScrollViewState {
+    /// Create a new scroll view state with an offset of (0, 0)
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create a new scroll view state with the given offset
+    pub fn with_offset(offset: Position) -> Self {
+        Self {
+            offset,
+            ..Default::default()
+        }
+    }
+
+    /// Set the offset of the scroll view state
+    pub const fn set_offset(&mut self, offset: Position) {
+        self.offset = offset;
+    }
+
+    /// Get the offset of the scroll view state
+    pub const fn offset(&self) -> Position {
+        self.offset
+    }
+
+    /// Move the scroll view state up by one row
+    pub const fn scroll_up(&mut self) {
+        self.offset.y = self.offset.y.saturating_sub(1);
+    }
+
+    /// Move the scroll view state down by one row
+    pub const fn scroll_down(&mut self) {
+        self.offset.y = self.offset.y.saturating_add(1);
+    }
+
+    /// Move the scroll view state down by one page
+    pub fn scroll_page_down(&mut self) {
+        let page_size = self.page_size.map_or(1, |size| size.height);
+        // we subtract 1 to ensure that there is a one row overlap between pages
+        self.offset.y = self.offset.y.saturating_add(page_size).saturating_sub(1);
+    }
+
+    /// Move the scroll view state up by one page
+    pub fn scroll_page_up(&mut self) {
+        let page_size = self.page_size.map_or(1, |size| size.height);
+        // we add 1 to ensure that there is a one row overlap between pages
+        self.offset.y = self.offset.y.saturating_add(1).saturating_sub(page_size);
+    }
+
+    /// Move the scroll view state left by one column
+    pub const fn scroll_left(&mut self) {
+        self.offset.x = self.offset.x.saturating_sub(1);
+    }
+
+    /// Move the scroll view state right by one column
+    pub const fn scroll_right(&mut self) {
+        self.offset.x = self.offset.x.saturating_add(1);
+    }
+
+    /// Move the scroll view state to the top of the buffer
+    pub const fn scroll_to_top(&mut self) {
+        self.offset = Position::ORIGIN;
+    }
+
+    /// Move the scroll view state to the bottom of the buffer
+    ///
+    /// If the buffer size is not yet computed (done during the first rendering), it will not
+    /// be taken into account and the scroll offset will be set to the maximum value: `u16::MAX`
+    pub fn scroll_to_bottom(&mut self) {
+        // the render call will adjust the offset to ensure that we don't scroll past the end of
+        // the buffer, so we can set the offset to the maximum value here
+        let bottom = self
+            .size
+            .map_or(u16::MAX, |size| size.height.saturating_sub(1));
+        self.offset.y = bottom;
+    }
+
+    /// True if the scroll view state is at the bottom of the buffer
+    ///
+    /// This takes the page size into account. It returns true if the last row in the buffer is
+    /// visible in the current page.
+    ///
+    /// The buffer and the page size are unknown until computed during the first rendering. If the
+    /// buffer size is not yet known, this function always returns true. If the page size is not yet
+    /// known, the current row is treated as a one-row page.
+    ///
+    /// Saturating arithmetic prevents large offsets from overflowing when they are combined with
+    /// the page size.
+    pub fn is_at_bottom(&self) -> bool {
+        let Some(size) = self.size else {
+            return true;
+        };
+        let bottom = size.height.saturating_sub(1);
+        let page_size = self.page_size.map_or(1, |size| size.height);
+        self.offset.y.saturating_add(page_size) > bottom
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_at_bottom_requires_the_last_row_to_be_visible() {
+        let mut state = ScrollViewState {
+            offset: Position::new(0, 4),
+            size: Some(Size::new(1, 10)),
+            page_size: Some(Size::new(1, 5)),
+        };
+
+        assert!(!state.is_at_bottom());
+
+        state.offset.y = 5;
+
+        assert!(state.is_at_bottom());
+    }
+}

@@ -145,11 +145,11 @@ bitflags::bitflags! {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct Stats<T: ArchReg> {
-    speculative: GenericArray<(T, Option<T::Repr>), T::COUNT>,
-    committed: GenericArray<(T, T::Repr), T::COUNT>,
-}
+#[derive(derive_more::Debug, derive_more::PartialEq, derive_more::Eq, derive_more::Deref)]
+pub struct Stats<T: ArchReg>(GenericArray<RegStats<T>, T::COUNT>);
+
+#[allow(type_alias_bounds)]
+pub type RegStats<T: ArchReg> = (T, Option<T::Repr>, T::Repr);
 
 impl<T> Clone for Stats<T>
 where
@@ -157,10 +157,7 @@ where
     T::Repr: Clone,
 {
     fn clone(&self) -> Self {
-        Self {
-            speculative: self.speculative.clone(),
-            committed: self.committed.clone(),
-        }
+        Self(self.0.clone())
     }
 }
 
@@ -168,19 +165,8 @@ impl<T> Copy for Stats<T>
 where
     T: ArchReg,
     T::Repr: Copy,
-    <T::COUNT as ArrayLength>::ArrayType<(T, Option<T::Repr>)>: Copy,
-    <T::COUNT as ArrayLength>::ArrayType<(T, T::Repr)>: Copy,
+    <T::COUNT as ArrayLength>::ArrayType<(T, Option<T::Repr>, T::Repr)>: Copy,
 {
-}
-
-impl<T: ArchReg> Stats<T> {
-    pub fn speculative(&self) -> &[(T, Option<T::Repr>)] {
-        self.speculative.as_slice()
-    }
-
-    pub fn committed(&self) -> &[(T, T::Repr)] {
-        self.committed.as_slice()
-    }
 }
 
 impl<T: ArchReg> Rat<T> {
@@ -190,17 +176,20 @@ impl<T: ArchReg> Rat<T> {
         T::Repr: Clone,
     {
         let variants = GenericArray::<_, T::COUNT>::from_slice(T::VARIANTS);
-        let map = |mapping: &Buf<Mapping<RegIdx, _>>| {
-            mapping.read_copied().zip(variants, |idx, reg| {
-                (*reg, prf.regs[idx].try_read().cloned())
-            })
-        };
+        let values = self
+            .mapping
+            .read_copied()
+            .zip(self.committed.read().0, |s, c| {
+                let s = prf.regs[s].try_read().cloned();
+                let c = prf.regs[c]
+                    .try_read()
+                    .cloned()
+                    .expect("committed register should not be busy");
 
-        Stats {
-            speculative: map(&self.mapping),
-            committed: map(&self.committed)
-                .map(|(reg, v)| (reg, v.expect("committed register should not be busy"))),
-        }
+                (s, c)
+            });
+
+        Stats(variants.zip(values, |reg, (s, c)| (*reg, s, c)))
     }
 }
 
