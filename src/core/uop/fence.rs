@@ -1,4 +1,6 @@
+use super::INST_NAME_WIDTH;
 use bitflags::bitflags;
+use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Fence(Fields);
@@ -45,5 +47,30 @@ impl Fence {
 
     pub(crate) fn sld(&self) -> bool {
         self.0.intersects(Fields::SI | Fields::SR)
+    }
+}
+
+impl fmt::Display for Fence {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let width = if f.alternate() { INST_NAME_WIDTH } else { 0 };
+        write!(f, "{:<width$}", "fence")?;
+        let fields = |f: &mut fmt::Formatter<'_>, r, w, i, o| {
+            if r {
+                write!(f, " {}", "R")?;
+            }
+            if w {
+                write!(f, " {}", "W")?;
+            }
+            if i {
+                write!(f, " {}", "I")?;
+            }
+            if o {
+                write!(f, " {}", "O")?;
+            }
+            Ok(())
+        };
+        fields(f, self.pr(), self.pw(), self.pi(), self.po())?;
+        write!(f, ", ")?;
+        fields(f, self.sr(), self.sw(), self.si(), self.so())
     }
 }

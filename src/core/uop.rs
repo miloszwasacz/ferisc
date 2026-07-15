@@ -1,6 +1,8 @@
 use self::fence::Fence;
 use crate::core::reg::ArchReg;
-use strum::FromRepr;
+use strum::{Display, FromRepr};
+
+const INST_NAME_WIDTH: usize = 8;
 
 pub mod fence;
 pub mod int;
@@ -14,7 +16,7 @@ pub mod issue;
 pub mod predecode;
 pub mod rename;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, derive_more::Display, Clone, Copy, PartialEq, Eq)]
 pub enum UopKind<I> {
     Int(I),
     MemOrd(Fence),
@@ -28,7 +30,7 @@ pub trait InferUop<T: ArchReg> {
 #[allow(type_alias_bounds)]
 pub type Infer<U: InferUop<T>, T> = <U as InferUop<T>>::Kind;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr)]
+#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, FromRepr)]
 #[repr(u64)]
 pub enum Exception {
     /// Instruction address misaligned
@@ -48,11 +50,14 @@ pub enum Exception {
     /// Store/AMO access fault
     StAccessFault = 7,
     /// Environment call from U-Mode
+    #[strum(to_string = "ECALL (from U-mode)")]
     EcallU = 8,
     /// Environment call from S-Mode
+    #[strum(to_string = "ECALL (from S-mode)")]
     EcallS = 9,
     // Reserved = 10,
     /// Environment call from M-Mode
+    #[strum(to_string = "ECALL (from M-mode)")]
     EcallM = 11,
     /// Instruction page fault
     InstrPageFault = 12,

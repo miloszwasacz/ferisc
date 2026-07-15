@@ -1,7 +1,7 @@
 use self::dashboard::Dashboard;
 use self::nav::NavInfoBuilder;
-use crate::core::{Config, Core, mem::DirectHierarchy};
-use crate::mem::Dram;
+use crate::core::{Config, Core, mem::DirectHierarchy, reg::int::IntVal};
+use crate::mem::{Addr, Dram};
 use crate::seq::Sequential;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::buffer::Buffer;
@@ -10,6 +10,7 @@ use ratatui::macros::vertical;
 use ratatui::symbols;
 use ratatui::text::ToLine;
 use ratatui::widgets::{StatefulWidget, Tabs, Widget};
+use std::fmt;
 use std::sync::{Arc, RwLock};
 use strum::{Display, VariantArray};
 
@@ -35,11 +36,12 @@ impl Sim {
         let elf = elf::ElfBytes::<elf::endian::LittleEndian>::minimal_parse(elf_data).unwrap();
         let entry = elf.ehdr.e_entry;
         let mem = Arc::new(RwLock::new(Dram::new(1024 * 1024 * 1024, elf, elf_data)));
-        let core = make_core(entry, mem.clone());
+        let config = make_core_config(entry);
+        let core = Core::new(&config, || DirectHierarchy::new(mem.clone()));
 
         Self {
             tabs: Default::default(),
-            dashboard: Dashboard::new(core.stats()),
+            dashboard: Dashboard::new(core.stats(), &config),
 
             core,
             mem,
@@ -115,8 +117,6 @@ pub enum EventResult {
     //TODO Err
 }
 
-//#region Tabs
-
 focus_state! {
     #[repr(u8)]
     #[derive(Debug, Display, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -128,10 +128,32 @@ focus_state! {
     }
 }
 
+//#region AddrView
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AddrView(pub Addr);
+
+impl fmt::Display for AddrView {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        const WIDTH: usize = 7;
+        if f.alternate() {
+            write!(f, "0x{:0width$x}", self.0, width = WIDTH)
+        } else {
+            write!(f, "{:0width$x}", self.0, width = WIDTH)
+        }
+    }
+}
+
+impl IntVal {
+    pub fn addr_view(&self) -> AddrView {
+        AddrView(self.addr())
+    }
+}
+
 //#endregion
 
 //TODO Remove this
-fn make_core(entrypoint: crate::mem::Addr, mem: Arc<RwLock<Dram>>) -> Core<DirectHierarchy> {
+fn make_core_config(entrypoint: Addr) -> Config {
     use crate::core::{
         ee::{eu, pipeline, rob, rs},
         fe::{decode, fetch},
@@ -139,37 +161,34 @@ fn make_core(entrypoint: crate::mem::Addr, mem: Arc<RwLock<Dram>>) -> Core<Direc
     };
     use std::num::{NonZeroU8, NonZeroUsize};
 
-    Core::new(
-        Config {
-            entrypoint,
-            fetch: fetch::Config {
-                packet_width: NonZeroU8::new(4 * size_of::<u32>() as u8).unwrap(),
-            },
-            decode: decode::Config {
-                width: NonZeroU8::new(1).unwrap(),
-                queue_size: None,
-            },
-            rob: rob::Config {
-                size: NonZeroUsize::new(100).unwrap(),
-                commit_width: NonZeroU8::new(1).unwrap(),
-                flush_width: None,
-            },
-            pipelines: pipeline::Configs {
-                int: pipeline::Config {
-                    prf_size: NonZeroUsize::new(200).unwrap(),
-                    lines: [rs::Config {
-                        size: NonZeroUsize::new(10).unwrap(),
-                    }]
-                    .map(|rs| (rs, eu::Config {}))
-                    .repeat(5)
-                    .into_boxed_slice(),
-                },
-            },
-            mem: mem::Config {
-                ldq_size: NonZeroUsize::new(10).unwrap(),
-                stq_size: NonZeroUsize::new(10).unwrap(),
+    Config {
+        entrypoint,
+        fetch: fetch::Config {
+            packet_width: NonZeroU8::new(4 * size_of::<u32>() as u8).unwrap(),
+        },
+        decode: decode::Config {
+            width: NonZeroU8::new(4).unwrap(),
+            queue_size: None,
+        },
+        rob: rob::Config {
+            size: NonZeroUsize::new(100).unwrap(),
+            commit_width: NonZeroU8::new(1).unwrap(),
+            flush_width: None,
+        },
+        pipelines: pipeline::Configs {
+            int: pipeline::Config {
+                prf_size: NonZeroUsize::new(200).unwrap(),
+                lines: [rs::Config {
+                    size: NonZeroUsize::new(10).unwrap(),
+                }]
+                .map(|rs| (rs, eu::Config {}))
+                .repeat(5)
+                .into_boxed_slice(),
             },
         },
-        || DirectHierarchy::new(mem),
-    )
+        mem: mem::Config {
+            ldq_size: NonZeroUsize::new(10).unwrap(),
+            stq_size: NonZeroUsize::new(10).unwrap(),
+        },
+    }
 }

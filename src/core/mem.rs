@@ -1,7 +1,7 @@
 // pub use self::cached::CachedHierarchy;
 pub use self::direct::DirectHierarchy;
 use self::entry::Entry;
-pub use self::entry::{AddrBypass, AddrBypassBuilder, AddrHandle, LdEntry, StEntry};
+pub use self::entry::{AddrBypass, AddrBypassBuilder, AddrHandle, LdEntry, Src, StEntry};
 use self::locks::{DispatchLock, FlushLock};
 use self::queue::Queue;
 use crate::core::{

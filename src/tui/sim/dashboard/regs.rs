@@ -24,6 +24,10 @@ impl IntRegs {
         Self(stats, Default::default())
     }
 
+    pub fn update(&mut self, stats: Stats) {
+        self.0 = stats;
+    }
+
     pub fn handle_event(&mut self, event: KeyEvent) -> bool {
         let mut scroll = self.1.borrow_mut();
         let scroll_fn = match event {

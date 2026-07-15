@@ -22,7 +22,7 @@ tui = ["crossterm", "ratatui", "elf"]
 [dependencies]
 ferisc-macros = { workspace = true }
 strum = { version = "0.28.0", features = ["derive"] }
-derive_more = { version = "2.1.1", features = ["constructor", "debug", "deref", "deref_mut", "eq"] }
+derive_more = { version = "2.1.1", features = ["constructor", "debug", "display", "deref", "deref_mut", "eq"] }
 generic-array = "1.4.3"
 num_enum = "0.7.6"
 bitflags = "2.13.0"

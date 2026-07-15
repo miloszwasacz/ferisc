@@ -1,3 +1,4 @@
+use super::INST_NAME_WIDTH;
 use crate::core::{
     csr::CsrAddr,
     mem::AddrHandle,
@@ -8,6 +9,8 @@ use crate::core::{
     uop::fetch::BtbPred,
 };
 use crate::mem::Addr;
+use crate::tui::sim::AddrView;
+use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeUop<R, S, D> {
@@ -126,7 +129,17 @@ impl<R> Src<R> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+impl<R: fmt::Display> fmt::Display for Src<R> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Reg(reg) => fmt::Display::fmt(reg, f),
+            Self::Imm(imm) => fmt::Display::fmt(&imm.s(), f),
+        }
+    }
+}
+
+#[derive(Debug, derive_more::Display, Clone, Copy, PartialEq, Eq, Hash)]
+#[display(rename_all = "lowercase")]
 pub enum AluOp {
     Add,
     Sub,
@@ -145,7 +158,8 @@ pub enum AluOp {
     Sraw,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, derive_more::Display, Clone, Copy, PartialEq, Eq, Hash)]
+#[display(rename_all = "lowercase")]
 pub enum MulOp {
     Mul,
     Mulh,
@@ -162,7 +176,8 @@ pub enum MulOp {
     Remuw,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, derive_more::Display, Clone, Copy, PartialEq, Eq, Hash)]
+#[display(rename_all = "lowercase")]
 pub enum BrCmp {
     Eq,
     Ne,
@@ -172,7 +187,8 @@ pub enum BrCmp {
     Geu,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, derive_more::Display, Clone, Copy, PartialEq, Eq, Hash)]
+#[display(rename_all = "lowercase")]
 pub enum CsrOp {
     /// Atomic Read/Write
     Rw,
@@ -180,4 +196,95 @@ pub enum CsrOp {
     Rs,
     /// Atomic Read and Clear Bits
     Rc,
+}
+
+impl<R: fmt::Display, S: fmt::Display, D: fmt::Display> fmt::Display for FeUop<R, S, D> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut width = if f.alternate() { INST_NAME_WIDTH } else { 0 };
+        let ld_st_size = |size| match size {
+            1 => "b",
+            2 => "h",
+            4 => "w",
+            8 => "d",
+            s => panic!("invalid size: {}", s),
+        };
+        match self {
+            Self::Alu {
+                op,
+                src1,
+                src2,
+                dest,
+            } => write!(f, "{:<width$} {}, {}, {}", op.to_string(), dest, src1, src2),
+            Self::Mul {
+                op,
+                src1,
+                src2,
+                dest,
+            } => write!(f, "{:<width$} {}, {}, {}", op.to_string(), dest, src1, src2),
+            Self::Jal { target, link, .. } => {
+                write!(f, "{:<width$} {}, {}", "jal", link, AddrView(*target))
+            }
+            Self::Jalr {
+                base, offset, link, ..
+            } => {
+                write!(f, "{:<width$} {}, {}({})", "jalr", link, offset.s(), base)
+            }
+            Self::Br {
+                cmp,
+                src1,
+                src2,
+                target,
+                ..
+            } => {
+                width = width.saturating_sub(1);
+                write!(
+                    f,
+                    "b{:<width$} {}, {}, {}",
+                    cmp.to_string(),
+                    src1,
+                    src2,
+                    AddrView(*target)
+                )
+            }
+            Self::Ld {
+                size,
+                signed,
+                base,
+                offset,
+                dest,
+            } => {
+                width = width.saturating_sub(2);
+                let size = ld_st_size(*size);
+                let signed = if *signed {
+                    ""
+                } else {
+                    width = width.saturating_sub(1);
+                    "u"
+                };
+                write!(
+                    f,
+                    "l{}{:<width$} {}, {}({})",
+                    size,
+                    signed,
+                    dest,
+                    offset.s(),
+                    base
+                )
+            }
+            Self::St {
+                size,
+                src,
+                base,
+                offset,
+            } => {
+                width = width.saturating_sub(1);
+                let size = ld_st_size(*size);
+                write!(f, "s{:<width$} {}, {}({})", size, src, offset.s(), base)
+            }
+            Self::Csr { op, csr, src, dest } => {
+                width = width.saturating_sub(3);
+                write!(f, "csr{:<width$} {}{}{}", op.to_string(), csr, src, dest)
+            }
+        }
+    }
 }

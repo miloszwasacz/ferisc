@@ -16,7 +16,7 @@ where
     lines: Box<[LineStats<T>]>,
 }
 
-type LineStats<T> = (rs::Stats<IUop<T>>, eu::Stats<EUop<T>>);
+pub type LineStats<T> = (rs::Stats<IUop<T>>, eu::Stats<EUop<T>>);
 
 impl<T> Clone for Stats<T>
 where

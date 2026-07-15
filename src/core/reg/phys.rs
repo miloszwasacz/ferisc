@@ -97,6 +97,12 @@ pub struct RegOper<T> {
     arch: T,
 }
 
+impl<T> RegOper<T> {
+    pub fn arch(&self) -> &T {
+        &self.arch
+    }
+}
+
 /// Physical register destination
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RegDest<T> {
@@ -155,6 +161,14 @@ impl<T: ArchReg> Prf<T> {
                 .map(|reg| reg.try_read().cloned())
                 .collect(),
         )
+    }
+}
+
+impl<T: ArchReg> Index<RegOper<T>> for Stats<T> {
+    type Output = Option<T::Repr>;
+
+    fn index(&self, index: RegOper<T>) -> &Self::Output {
+        &self.0[index.idx]
     }
 }
 

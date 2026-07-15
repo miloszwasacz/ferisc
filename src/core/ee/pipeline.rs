@@ -1,5 +1,5 @@
 pub use self::config::{Config, Configs};
-pub use self::stats::{AllStats, Stats};
+pub use self::stats::{AllStats, LineStats, Stats};
 use crate::core::{
     csr::CsrFile,
     ee::{

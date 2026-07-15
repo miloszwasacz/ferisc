@@ -39,7 +39,7 @@ pub struct Core<H: MemHierarchy, D = DefaultDecoder> {
 }
 
 impl<H: MemHierarchy, D: Decoder> Core<H, D> {
-    pub fn new(config: Config, make_mem_hier: impl FnOnce() -> H) -> Self {
+    pub fn new(config: &Config, make_mem_hier: impl FnOnce() -> H) -> Self {
         let mut hier = make_mem_hier();
         Self {
             addr_gen: AddrGen::new(config.entrypoint),

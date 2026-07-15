@@ -5,8 +5,9 @@ use self::pipelines::Pipelines;
 use self::predecode::Predecode;
 use self::regs::IntRegs;
 use self::rob::Rob;
+use self::uop_list::UopList;
 use super::NavInfoBuilder;
-use crate::core::Stats;
+use crate::core::{Config, Stats};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use num_enum::IntoPrimitive;
 use ratatui::buffer::Buffer;
@@ -16,6 +17,8 @@ use ratatui::style::Stylize;
 use ratatui::symbols::merge::MergeStrategy;
 use ratatui::widgets::{Block, BorderType, Clear, StatefulWidget, Widget};
 use strum::{Display, FromRepr, VariantArray};
+
+mod uop_list;
 
 pub mod decode;
 pub mod fetch;
@@ -37,7 +40,7 @@ pub struct Dashboard {
 }
 
 impl Dashboard {
-    pub fn new(stats: Stats) -> Self {
+    pub fn new(stats: Stats, config: &Config) -> Self {
         let Stats {
             addr_gen,
             fetch,
@@ -56,17 +59,32 @@ impl Dashboard {
             decode: Decode::new(decode),
             rob: Rob::new(rob),
             int_regs: IntRegs::new(pipelines.int.rat),
-            pipelines: Pipelines::new(pipelines),
-            mem: MemSubsystem::new(mem),
+            pipelines: Pipelines::new(pipelines, &config.pipelines),
+            mem: MemSubsystem::new(mem, &config.mem),
             focus: Default::default(),
         }
     }
 
     pub fn update(&mut self, stats: Stats) {
-        *self = Self {
-            focus: self.focus,
-            ..Self::new(stats)
-        }
+        let Stats {
+            addr_gen,
+            fetch,
+            predecode,
+            decode,
+            rob,
+            pipelines,
+            mem,
+            csrf: _,
+            mode: _,
+        } = stats;
+
+        self.fetch.update(addr_gen, fetch);
+        self.predecode.update(predecode);
+        self.decode.update(decode);
+        self.rob.update(rob);
+        self.int_regs.update(pipelines.int.rat);
+        self.pipelines.update(pipelines);
+        self.mem.update(mem);
     }
 
     pub fn handle_event(&mut self, event: KeyEvent) -> EventResult {
@@ -77,15 +95,15 @@ impl Dashboard {
             key_event!(KeyCode::Left, KeyModifiers::CONTROL) => self.focus.left(),
             key_event!(KeyCode::Right, KeyModifiers::CONTROL) => self.focus.right(),
             _ => {
-                // match self.focus {
-                //     Focus::Fetch => self.fetch.handle_event(event),
-                //     Focus::Predecode => self.predecode.handle_event(event),
-                //     Focus::Decode => self.decode.handle_event(event),
-                //     Focus::Rob => self.rob.handle_event(event),
-                //     Focus::Pipelines => self.pipelines.handle_event(event),
-                //     Focus::Mem => self.mem.handle_event(event),
-                //     Focus::SpecRegs | Focus::ComRegs => self.regs.handle_event(event),
-                // }
+                match self.focus {
+                    Focus::Fetch => self.fetch.handle_event(event),
+                    Focus::Predecode => self.predecode.handle_event(event),
+                    Focus::Decode => self.decode.handle_event(event),
+                    Focus::Rob => self.rob.handle_event(event),
+                    Focus::Pipelines => self.pipelines.handle_event(event),
+                    Focus::Mem => self.mem.handle_event(event),
+                    Focus::IntRegs => self.int_regs.handle_event(event),
+                };
                 return EventResult::Ok;
             }
         };
@@ -148,9 +166,15 @@ impl StatefulWidget for &Dashboard {
             Predecode(Predecode, "Predecode"),
             Decode(Decode, "Decode"),
             Rob(Rob, "ROB", "Reorder Buffer"),
-            Pipelines(Pipelines, "Pipelines"),
-            Mem(Mem, "Mem", "Memory")
+            Pipelines(Pipelines, "Pipelines")
         ];
+        {
+            let mut focused = state.take_if(|_| matches!(self.focus, Focus::Mem));
+            self.mem.render(mem_area, buf, &mut focused);
+            if focused.is_some() {
+                state = focused;
+            }
+        }
         stage_blocks![Regs{self.int_regs}(IntRegs, "Regs", "Integer Registers", "Int Registers", "Int Regs")];
         let _ = state;
     }

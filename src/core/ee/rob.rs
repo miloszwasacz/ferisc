@@ -1,4 +1,5 @@
-use self::entry::{Entry, UopKind};
+use self::entry::Entry;
+pub use self::entry::UopKind;
 use self::flush::{Flush, FlushPriority};
 pub use self::flush::{Uop as FlushedUop, UopKind as FlushedUopKind};
 use self::locks::{AccessLock, FlushAllLock, FlushLock};
@@ -115,7 +116,7 @@ pub struct Stats(Box<[EntryStats]>);
 
 #[derive(Debug, Clone)]
 pub struct EntryStats {
-    pub kind: UopKind<()>,
+    pub kind: UopKind<Fence>,
     pub addr: Addr,
 }
 
@@ -133,5 +134,22 @@ impl Rob {
                 })
                 .collect(),
         )
+    }
+}
+
+impl From<&UopKind> for UopKind<Fence> {
+    fn from(value: &UopKind) -> Self {
+        match value {
+            UopKind::Reg(dest) => Self::Reg(*dest),
+            UopKind::Br { done } => Self::Br { done: *done },
+            UopKind::Ld { dest, done } => Self::Ld {
+                dest: *dest,
+                done: *done,
+            },
+            UopKind::St { done } => Self::St { done: *done },
+            UopKind::Csr(dest, csr) => Self::Csr(*dest, *csr),
+            UopKind::MemOrd(fence) => Self::MemOrd(**fence),
+            UopKind::Except(ex) => Self::Except(*ex),
+        }
     }
 }
