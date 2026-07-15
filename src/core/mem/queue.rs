@@ -157,5 +157,8 @@ impl<T> Sequential for Queue<T> {
     fn finish_cycle(&mut self) {
         self.len.write(self.queue.len());
         self.len.finish_cycle();
+        for s in self.queue.iter_mut() {
+            s.borrow_mut().addr.finish_cycle();
+        }
     }
 }

@@ -53,6 +53,9 @@ impl Rob {
 impl Sequential for Rob {
     fn finish_cycle(&mut self) {
         self.queue.finish_cycle();
+        for s in self.queue.iter() {
+            s.borrow_mut().kind.finish_cycle();
+        }
         self.flush.finish_cycle();
         drop(self.committed_fences.drain(..))
     }

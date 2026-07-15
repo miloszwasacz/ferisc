@@ -50,6 +50,7 @@ impl<M: IMem> FetchUnit<M> {
 
     pub fn clear(&mut self, mut mem: impl DerefMut<Target = M>) {
         self.flushed = true;
+        self.out_queue.clear();
         if let Some((h, _)) = self.req.take() {
             mem.deref_mut().kill(h);
         }

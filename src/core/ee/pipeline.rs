@@ -97,6 +97,7 @@ where
 {
     fn finish_cycle(&mut self) {
         self.rat.finish_cycle();
+        self.prf.finish_cycle();
         for (rs, eu) in &mut self.lines {
             rs.finish_cycle();
             eu.finish_cycle();
@@ -111,7 +112,7 @@ where
     IUop<T>: Issue,
 {
     fn clear(&mut self) {
-        self.rat.flush_all(self.prf.size());
+        self.rat.flush_all(&mut self.prf);
         for (rs, eu) in &mut self.lines {
             rs.clear();
             eu.clear();

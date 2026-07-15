@@ -40,14 +40,14 @@ impl<R> ReqBuf<R> {
     //TODO Add a note that this method calls `finish_cycle`
     pub fn try_complete<P: FnOnce(&R) -> bool, F: FnOnce(R) -> R>(
         &mut self,
-        is_complete: P,
+        is_incomplete: P,
         complete: F,
     ) -> bool {
         self.finish_cycle();
 
         let mut completed = false;
         self.value = self.value.take().map(|req| {
-            if is_complete(&req) {
+            if is_incomplete(&req) {
                 completed = true;
                 complete(req)
             } else {

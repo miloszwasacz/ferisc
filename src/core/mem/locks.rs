@@ -90,7 +90,7 @@ impl<'a, M: DMem> Transformer<'a> for DispatchTrans<'a, M> {
         let dispatched = Cell::default();
         let fence = lock.fence.get();
         let add_ld = |size, signed, dest| {
-            if lock.mem.ldq.free_space() > 0 {
+            if lock.mem.ldq.free_space() == 0 {
                 return None;
             }
             let deps = lock
@@ -123,7 +123,7 @@ impl<'a, M: DMem> Transformer<'a> for DispatchTrans<'a, M> {
             Some(handle.into())
         };
         let add_st = |size, src| {
-            if lock.mem.stq.free_space() > 0 {
+            if lock.mem.stq.free_space() == 0 {
                 return None;
             }
             let deps = lock

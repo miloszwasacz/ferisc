@@ -125,7 +125,7 @@ impl Mem<StReq<Exception>> for Dram {
             #[cfg(debug_assertions)]
             id: self.id(),
             #[cfg(debug_assertions)]
-            ty: super::ReqType::Ld,
+            ty: super::ReqType::St,
             conn,
         }
     }
@@ -162,7 +162,7 @@ impl Sequential for Dram {
     fn finish_cycle(&mut self) {
         // The requests are executed in a round-robin manner across all connections
         macro_rules! finish_for_conns {
-            ($conns:expr, $is_complete:expr, $complete:expr) => {{
+            ($conns:expr, $is_incomplete:expr, $complete:expr) => {{
                 let mut iter = {
                     let (l, r) = $conns.0.split_at_mut($conns.1);
                     let offset = r.len();
@@ -172,7 +172,7 @@ impl Sequential for Dram {
                 };
                 // Find te first request that is incomplete
                 let completed = iter
-                    .find_map(|(i, req)| req.try_complete($is_complete, $complete).then_some(i))
+                    .find_map(|(i, req)| req.try_complete($is_incomplete, $complete).then_some(i))
                     .unwrap_or($conns.1);
 
                 // Finish cycle on the remaining buffers
@@ -187,7 +187,7 @@ impl Sequential for Dram {
 
         finish_for_conns!(
             self.ld_reqs,
-            |req| !matches!(req.state(), ReqState::Incomplete(_)),
+            |req| matches!(req.state(), ReqState::Incomplete(_)),
             |req| {
                 //TODO Latency
                 let data = self.mem[req.addr() as usize..][..req.size()].into();
@@ -196,7 +196,7 @@ impl Sequential for Dram {
         );
         finish_for_conns!(
             self.st_reqs,
-            |req| !matches!(req.state(), ReqState::Incomplete(_)),
+            |req| matches!(req.state(), ReqState::Incomplete(_)),
             |req| {
                 //TODO Latency
                 let ReqState::Incomplete(data) = req.state() else {

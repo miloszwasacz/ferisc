@@ -90,7 +90,7 @@ impl<T: ArchReg> Rat<T> {
         FlushLock::new(prf, self)
     }
 
-    pub fn flush_all(&mut self, prf_size: usize) {
+    pub fn flush_all(&mut self, prf: &mut Prf<T>) {
         #[cfg(debug_assertions)]
         {
             assert!(
@@ -101,7 +101,7 @@ impl<T: ArchReg> Rat<T> {
         }
         self.mapping.write(self.committed.read_copied());
         self.free_list
-            .reset_from_mapping(self.committed.read(), prf_size);
+            .reset_from_mapping(self.committed.read(), prf);
     }
 }
 

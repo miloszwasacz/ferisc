@@ -104,6 +104,7 @@ impl<'a, 'g, D: Decoder + 'a> Transformer<'a> for DecodeTrans<'a, 'g, D> {
     fn commit(self, lock: &mut Self::Lock) {
         if let Some(target) = self.jump {
             lock.addr_gen.decode(target);
+            lock.decoders = None;
         }
     }
 }

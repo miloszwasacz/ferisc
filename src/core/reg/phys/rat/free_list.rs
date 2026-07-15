@@ -1,5 +1,8 @@
 use super::{Mapping, RegIdx, RenameLock};
-use crate::core::reg::{ArchReg, phys::HARDWIRED_IDX};
+use crate::core::reg::{
+    ArchReg,
+    phys::{HARDWIRED_IDX, Prf},
+};
 use crate::seq::Sequential;
 use generic_array::GenericArray;
 use static_assertions::const_assert_eq;
@@ -59,7 +62,7 @@ impl FreeList {
     pub(super) fn reset_from_mapping<T: ArchReg>(
         &mut self,
         mapping: &Mapping<RegIdx, T>,
-        prf_size: usize,
+        prf: &mut Prf<T>,
     ) {
         #[cfg(debug_assertions)]
         {
@@ -78,14 +81,19 @@ impl FreeList {
         };
 
         let mut i = 0;
-        self.queue = (FIRST_IDX..prf_size)
+        self.queue = (FIRST_IDX..prf.size())
             .filter(|idx| match mapping.get(i) {
                 Some(mapped) if *mapped == *idx => {
                     i += 1;
                     false
                 }
                 _ if *idx == HARDWIRED_IDX && any_hardwired => false,
-                None | Some(_) => true,
+                None | Some(_) => {
+                    if prf.regs[*idx].try_read().is_none() {
+                        prf.regs[*idx].write(Default::default());
+                    }
+                    true
+                }
             })
             .collect::<Queue>();
     }
