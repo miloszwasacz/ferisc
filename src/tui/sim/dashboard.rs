@@ -7,15 +7,17 @@ use self::regs::IntRegs;
 use self::rob::Rob;
 use self::uop_list::UopList;
 use super::NavInfoBuilder;
-use crate::core::{Config, Stats};
+use crate::core::{Config, Stats, uop::UopKind};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use num_enum::IntoPrimitive;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Rect, Spacing};
-use ratatui::macros::{horizontal, vertical};
+use ratatui::macros::{horizontal, span, vertical};
 use ratatui::style::Stylize;
 use ratatui::symbols::merge::MergeStrategy;
+use ratatui::text::Span;
 use ratatui::widgets::{Block, BorderType, Clear, StatefulWidget, Widget};
+use std::fmt;
 use strum::{Display, FromRepr, VariantArray};
 
 mod uop_list;
@@ -244,3 +246,15 @@ impl Focus {
 }
 
 pub type Focused<'a> = Option<&'a mut NavInfoBuilder>;
+
+impl<I> UopKind<I> {
+    pub fn as_span(&self) -> Span<'static>
+    where
+        UopKind<I>: fmt::Display,
+    {
+        match self {
+            UopKind::Except(ex) => span!("{}", ex).yellow(),
+            kind => span!("{:#}", kind),
+        }
+    }
+}

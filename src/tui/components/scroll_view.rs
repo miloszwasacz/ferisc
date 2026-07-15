@@ -91,10 +91,11 @@ pub enum ScrollbarVisibility {
 impl ScrollView<'_> {
     /// Create a new scroll view with a buffer of the given size
     ///
-    /// The buffer will be empty, with coordinates ranging from (0, 0) to (size.width, size.height).
+    /// The buffer will be empty, with coordinates ranging from (0, 0) to (`size.width`, `size.height`).
     pub fn new(size: Size) -> Self {
         // TODO: this is replaced with Rect::from(size) in the next version of ratatui
         let area = Rect::new(0, 0, size.width, size.height);
+        let style = Style::default().dark_gray();
         Self {
             buf: Buffer::empty(area),
             size,
@@ -106,8 +107,8 @@ impl ScrollView<'_> {
                 end: "▶",
                 ..symbols::scrollbar::DOUBLE_HORIZONTAL
             },
-            vertical_scrollbar_style: Default::default(),
-            horizontal_scrollbar_style: Default::default(),
+            vertical_scrollbar_style: style,
+            horizontal_scrollbar_style: style,
         }
     }
 
@@ -222,6 +223,14 @@ impl ScrollView<'_> {
         self.vertical_scrollbar_style = style;
         self.horizontal_scrollbar_style = style;
         self
+    }
+
+    pub fn focus(self, focus: bool) -> Self {
+        if focus {
+            self.scrollbars_style(Style::default().cyan())
+        } else {
+            self
+        }
     }
 
     /// Render a widget into the scroll buffer

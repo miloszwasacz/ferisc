@@ -9,8 +9,9 @@ use crossterm::event::{KeyCode, KeyEvent};
 use generic_array::GenericArray;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Flex, Position, Rect, Size};
-use ratatui::macros::horizontal;
-use ratatui::style::Style;
+use ratatui::macros::{horizontal, span};
+use ratatui::style::Stylize;
+use ratatui::text::Span;
 use ratatui::widgets::{Paragraph, Row, StatefulWidget, Table, Widget};
 use std::cell::RefCell;
 use std::ops::{Deref, DerefMut};
@@ -76,16 +77,16 @@ impl<'a> StatefulWidget for &'a IntRegs {
                     if fmt.len() > WIDTH {
                         fmt.replace_range(..fmt.len() - WIDTH, "…");
                     }
-                    fmt
+                    Span::raw(fmt)
                 };
 
-                names[i].write(format!("{:>width$}", r, width = WIDTH));
+                names[i].write(span!("{:>width$}", r, width = WIDTH));
                 spec[i].write(
                     s.as_ref()
-                        .map(int_val)
-                        .unwrap_or_else(|| format!("{:>width$}", '?', width = WIDTH)),
+                        .map(|val| int_val(val).light_magenta())
+                        .unwrap_or_else(|| span!("{:>width$}", '?', width = WIDTH).red()),
                 );
-                comm[i].write(int_val(c));
+                comm[i].write(int_val(c).green());
             }
 
             unsafe {
@@ -104,11 +105,7 @@ impl<'a> StatefulWidget for &'a IntRegs {
                 .unwrap_or(0) as _,
             table_area.height.saturating_sub(1),
         ))
-        .horizontal_scrollbar_style(if state.as_ref().is_some() {
-            Style::default().cyan()
-        } else {
-            Style::default()
-        });
+        .focus(state.is_some());
         let table = Table::new([Row::new(names), Row::new(spec), Row::new(comm)], widths)
             .column_spacing(SPACING)
             .flex(Flex::Start);

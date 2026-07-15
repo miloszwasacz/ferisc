@@ -98,6 +98,7 @@ impl<'a> Transformer<'a> for RenameTrans {
         DecUop { kind, addr, comp }: Self::In,
     ) -> Option<Self::Out> {
         debug_assert_matches!(self.kind, UopKind::None);
+        let display = kind;
         let kind = match kind {
             DecKind::Int(uop) => {
                 self.kind = UopKind::Int;
@@ -107,7 +108,13 @@ impl<'a> Transformer<'a> for RenameTrans {
             DecKind::Except(e) => RKind::Except(e),
         };
 
-        Some(Self::Out { kind, addr, comp })
+        Some(Self::Out {
+            kind,
+            addr,
+            comp,
+            #[cfg(feature = "tui")]
+            display,
+        })
     }
 
     fn commit(self, lock: &mut Self::Lock) {

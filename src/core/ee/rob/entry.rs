@@ -1,7 +1,7 @@
 use super::uop::{FenceHandle, Uop as DUop, UopKind as DKind};
 use crate::core::{
     csr::CsrAddr,
-    uop::{Exception, commit::Dest, fence::Fence, rename},
+    uop::{Exception, commit::Dest, decode, fence::Fence, rename},
 };
 use crate::mem::Addr;
 use crate::seq::Buf;
@@ -14,6 +14,8 @@ pub(super) struct Entry {
     pub kind: Buf<UopKind>,
     pub addr: Addr,
     pub comp: bool,
+    #[cfg(feature = "tui")]
+    pub display: decode::UopKind,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -28,7 +30,15 @@ pub enum UopKind<F = Rc<Fence>> {
 }
 
 impl From<rename::Uop> for (Entry, DUop) {
-    fn from(rename::Uop { kind, addr, comp }: rename::Uop) -> Self {
+    fn from(uop: rename::Uop) -> Self {
+        let rename::Uop {
+            kind,
+            addr,
+            comp,
+            #[cfg(feature = "tui")]
+            display,
+        } = uop;
+
         let (ekind, dkind) = match kind {
             rename::UopKind::Int(int) => (int.into(), DKind::Int(int)),
             rename::UopKind::MemOrd(fence) => {
@@ -43,6 +53,8 @@ impl From<rename::Uop> for (Entry, DUop) {
             kind: Buf::new(ekind),
             addr,
             comp,
+            #[cfg(feature = "tui")]
+            display,
         };
         let duop = DUop {
             kind: dkind,

@@ -1,11 +1,10 @@
 use super::{Focused, UopList};
-use crate::core::ee::rob::{Stats, UopKind};
+use crate::core::ee::rob::Stats;
 use crate::tui::sim::AddrView;
 use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::macros::{line, span};
-use ratatui::style::Stylize;
 use ratatui::widgets::StatefulWidget;
 
 pub struct Rob(UopList<Stats>);
@@ -32,16 +31,8 @@ impl<'a> StatefulWidget for &'a Rob {
             |stats| {
                 stats.iter().map(|entry| {
                     line![
-                        span!("{}: ", AddrView(entry.addr)),
-                        match entry.kind {
-                            UopKind::Reg(_) => span!("reg"),
-                            UopKind::Br { .. } => span!("br"),
-                            UopKind::Ld { .. } => span!("ld"),
-                            UopKind::St { .. } => span!("st"),
-                            UopKind::Csr(_, csr) => span!("csr {}", csr),
-                            UopKind::MemOrd(fence) => span!("{}", fence),
-                            UopKind::Except(ex) => span!("{}", ex).yellow(),
-                        }
+                        span!("{:#}: ", AddrView(entry.addr)),
+                        entry.display.as_span()
                     ]
                 })
             },

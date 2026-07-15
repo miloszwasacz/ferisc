@@ -32,7 +32,7 @@ impl<'a> StatefulWidget for &'a Predecode {
             |stats| {
                 stats.iter().map(|pd| {
                     line![
-                        span!("{}:", AddrView(pd.meta.addr)),
+                        span!("{:#}:", AddrView(pd.meta.addr)),
                         match &pd.bytes {
                             Ok(bytes) => match bytes {
                                 PdcdBytes::Normal(bytes) => span!("{:032b}", bytes),

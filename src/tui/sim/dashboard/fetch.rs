@@ -31,12 +31,16 @@ impl<'a> StatefulWidget for &'a Fetch {
     type State = Focused<'a>;
 
     fn render(self, area: Rect, buf: &mut Buffer, _: &mut Self::State) {
+        let width = AddrView::PRETTY_WIDTH;
         let text = Paragraph::new(vec![
-            line![span!("Next PC:    {:#}", AddrView(self.addr_gen.next_pc))],
+            line![span!(
+                "Next PC:    {:width$}",
+                AddrView(self.addr_gen.next_pc)
+            )],
             line![
                 "Fetched PC: ",
                 match self.fetch.fetching {
-                    Some(pc) => span!("{:#}", AddrView(pc)),
+                    Some(pc) => span!("{:width$}", AddrView(pc)),
                     None => span!(""),
                 }
             ],

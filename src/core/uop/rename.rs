@@ -26,6 +26,8 @@ pub struct Uop {
     pub kind: UopKind,
     pub addr: Addr,
     pub comp: bool,
+    #[cfg(feature = "tui")]
+    pub display: decode::UopKind,
 }
 
 pub type UopKind = super::UopKind<int::Uop>;

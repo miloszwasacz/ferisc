@@ -55,12 +55,6 @@ impl<'a> StatefulWidget for &'a MemSubsystem {
     type State = Focused<'a>;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let style = if state.is_some() {
-            Style::default().cyan()
-        } else {
-            Style::default()
-        };
-
         let count = self.stats.loads().len().max(self.stats.stores().len());
         let max_top = count.checked_sub(area.height.saturating_sub(BORDERS_LEN) as _);
         let scrolls = max_top.is_some();
@@ -69,13 +63,17 @@ impl<'a> StatefulWidget for &'a MemSubsystem {
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
             .merge_borders(MergeStrategy::Fuzzy)
-            .style(style);
+            .style(if state.is_some() {
+                Style::default().cyan()
+            } else {
+                Style::default()
+            });
         let mut render_blocks = |ldq, stq| {
             block.clone().title_top("LDQ").render(ldq, buf);
             block.clone().title_top("STQ").render(stq, buf);
         };
 
-        let (ldq_block_area, stq_block_area) = if !scrolls {
+        let (ldq_block_area, stq_block_area) = if scrolls {
             let [ldq_block_area, stq_block_area] = horizontal![*=1, *=1]
                 .spacing(Spacing::Overlap(1))
                 .areas(area);
@@ -102,7 +100,11 @@ impl<'a> StatefulWidget for &'a MemSubsystem {
             };
             render_blocks(ldq_block_area, stq_block_area);
             Scrollbar::new(ScrollbarOrientation::VerticalRight)
-                .style(style)
+                .style(if state.is_some() {
+                    Style::default().cyan()
+                } else {
+                    Style::default().dark_gray()
+                })
                 .render(scrollbar_area, buf, &mut scroll_state);
             self.top.set(scroll_state.get_position());
 

@@ -3,7 +3,7 @@ pub use self::entry::UopKind;
 use self::flush::{Flush, FlushPriority};
 pub use self::flush::{Uop as FlushedUop, UopKind as FlushedUopKind};
 use self::locks::{AccessLock, FlushAllLock, FlushLock};
-use crate::core::uop::{Exception, fence::Fence};
+use crate::core::uop::{Exception, decode, fence::Fence};
 use crate::mem::Addr;
 use crate::seq::{Pbuf, Queue, Sequential};
 use std::cell::RefCell;
@@ -121,6 +121,8 @@ pub struct Stats(Box<[EntryStats]>);
 pub struct EntryStats {
     pub kind: UopKind<Fence>,
     pub addr: Addr,
+    #[cfg(feature = "tui")]
+    pub display: decode::UopKind,
 }
 
 impl Rob {
@@ -133,6 +135,8 @@ impl Rob {
                     EntryStats {
                         kind: e.kind.read().into(),
                         addr: e.addr,
+                        #[cfg(feature = "tui")]
+                        display: e.display,
                     }
                 })
                 .collect(),

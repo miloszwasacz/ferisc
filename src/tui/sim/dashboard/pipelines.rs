@@ -14,7 +14,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Offset, Rect, Size, Spacing};
 use ratatui::macros::{line, span, vertical};
-use ratatui::style::{Style, Stylize};
+use ratatui::style::Stylize;
 use ratatui::symbols::merge::MergeStrategy;
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph, StatefulWidget, Widget};
 use std::cell::RefCell;
@@ -142,12 +142,8 @@ impl<'a> StatefulWidget for &'a Pipelines {
             ));
         }
 
-        let mut scroll_view = ScrollView::new(Size::new(scroll_view_width, height))
-            .scrollbars_style(if state.is_some() {
-                Style::default().cyan()
-            } else {
-                Style::default()
-            });
+        let mut scroll_view =
+            ScrollView::new(Size::new(scroll_view_width, height)).focus(state.is_some());
         let item_area = scroll_view.area().resize(Size::new(line_width, height));
 
         lines!(int)

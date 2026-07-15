@@ -133,13 +133,26 @@ focus_state! {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AddrView(pub Addr);
 
+impl AddrView {
+    /// The minimal width of the hexadecimal representation of the address
+    /// (excluding the _0x_ prefix).
+    pub const PRETTY_WIDTH: usize = 7;
+}
+
 impl fmt::Display for AddrView {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        const WIDTH: usize = 7;
-        if f.alternate() {
-            write!(f, "0x{:0width$x}", self.0, width = WIDTH)
+        if !f.alternate() {
+            write!(f, "0x{:0width$x}", self.0, width = f.width().unwrap_or(0))
         } else {
-            write!(f, "{:0width$x}", self.0, width = WIDTH)
+            write!(
+                f,
+                "{:0width$x}",
+                self.0,
+                width = f
+                    .width()
+                    .map(|w| w.max(Self::PRETTY_WIDTH))
+                    .unwrap_or(Self::PRETTY_WIDTH)
+            )
         }
     }
 }
