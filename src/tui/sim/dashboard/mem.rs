@@ -1,15 +1,19 @@
 use super::Focused;
 use crate::core::{
-    mem::{Config, Src, Stats},
+    mem::{Config, EntryStats, LdEntry, ReqStats, Src, StEntry, Stats},
     uop::commit::Dest,
 };
-use crate::tui::sim::AddrView;
+use crate::tui::{
+    focus::{FOCUS_COLOR, Focusable},
+    sim::AddrView,
+};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Rect, Spacing};
+use ratatui::layout::{Margin, Offset, Rect, Size, Spacing};
 use ratatui::macros::{horizontal, line, span};
 use ratatui::style::{Style, Stylize};
 use ratatui::symbols::merge::MergeStrategy;
+use ratatui::text::Span;
 use ratatui::widgets::{
     Block, BorderType, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
     StatefulWidget, Widget,
@@ -55,28 +59,28 @@ impl<'a> StatefulWidget for &'a MemSubsystem {
     type State = Focused<'a>;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        let req_area = area.resize(Size::new(area.width, 1));
+        let queues_area = area.outer(Margin::new(1, 0)) + Offset::new(0, 1);
+
+        // Queues
         let count = self.stats.loads().len().max(self.stats.stores().len());
-        let max_top = count.checked_sub(area.height.saturating_sub(BORDERS_LEN) as _);
+        let max_top = count.checked_sub(queues_area.height.saturating_sub(BORDERS_LEN) as _);
         let scrolls = max_top.is_some();
         self.top.update(|x| x.min(max_top.unwrap_or_default()));
 
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
             .merge_borders(MergeStrategy::Fuzzy)
-            .style(if state.is_some() {
-                Style::default().cyan()
-            } else {
-                Style::default()
-            });
+            .focus_if(state.is_some());
         let mut render_blocks = |ldq, stq| {
             block.clone().title_top("LDQ").render(ldq, buf);
             block.clone().title_top("STQ").render(stq, buf);
         };
 
-        let (ldq_block_area, stq_block_area) = if scrolls {
+        let (ldq_block_area, stq_block_area) = if !scrolls {
             let [ldq_block_area, stq_block_area] = horizontal![*=1, *=1]
                 .spacing(Spacing::Overlap(1))
-                .areas(area);
+                .areas(queues_area);
             render_blocks(ldq_block_area, stq_block_area);
 
             (ldq_block_area, stq_block_area)
@@ -90,7 +94,7 @@ impl<'a> StatefulWidget for &'a MemSubsystem {
 
             let [ldq_block_area, middle_area, right_area] = horizontal![*=1, *=1, ==2]
                 .spacing(Spacing::Overlap(1))
-                .areas(area);
+                .areas(queues_area);
             let stq_block_area = middle_area.union(right_area);
             let scrollbar_area = Rect {
                 x: right_area.x,
@@ -101,7 +105,7 @@ impl<'a> StatefulWidget for &'a MemSubsystem {
             render_blocks(ldq_block_area, stq_block_area);
             Scrollbar::new(ScrollbarOrientation::VerticalRight)
                 .style(if state.is_some() {
-                    Style::default().cyan()
+                    Style::default().fg(FOCUS_COLOR)
                 } else {
                     Style::default().dark_gray()
                 })
@@ -125,6 +129,23 @@ impl<'a> StatefulWidget for &'a MemSubsystem {
             Some(addr) => span!("{}", AddrView(addr)),
             None => span!("?").red(),
         };
+        let ld_line = |prefix: Span<'static>, ld: &EntryStats<LdEntry>| {
+            let size = get_size(ld.size);
+            let signed = if ld.signed { "" } else { "u" };
+            let dest = match ld.dest {
+                Dest::Int(dest) => span!("{}", dest.arch()),
+            };
+            let addr = get_addr(ld.addr);
+            line![prefix, span!("l{}{:1} ", size, signed), dest, ", ", addr]
+        };
+        let st_line = |prefix: Span<'static>, st: &EntryStats<StEntry>| {
+            let size = get_size(st.size);
+            let src = match st.src {
+                Src::Int(dest) => span!("{}", dest.arch()),
+            };
+            let addr = get_addr(st.addr);
+            line![prefix, span!("s{} ", size), src, ", ", addr]
+        };
 
         let ldq = Paragraph::new(
             self.stats
@@ -132,20 +153,7 @@ impl<'a> StatefulWidget for &'a MemSubsystem {
                 .iter()
                 .enumerate()
                 .skip(top)
-                .map(|(i, ld)| {
-                    let size = get_size(ld.size);
-                    let signed = if ld.signed { "" } else { "u" };
-                    let dest = match ld.dest {
-                        Dest::Int(dest) => span!("{}", dest.arch()),
-                    };
-                    let addr = get_addr(ld.addr);
-                    line![
-                        span!("{:>2}: l{}{:1} ", i + 1, size, signed),
-                        dest,
-                        ", ",
-                        addr
-                    ]
-                })
+                .map(|(i, ld)| ld_line(span!("{:2>}: ", i + 1), ld))
                 .collect::<Vec<_>>(),
         );
         Clear.render(ldq_area, buf);
@@ -157,17 +165,19 @@ impl<'a> StatefulWidget for &'a MemSubsystem {
                 .iter()
                 .enumerate()
                 .skip(top)
-                .map(|(i, st)| {
-                    let size = get_size(st.size);
-                    let src = match st.src {
-                        Src::Int(dest) => span!("{}", dest.arch()),
-                    };
-                    let addr = get_addr(st.addr);
-                    line![span!("{:>2}: s{} ", i + 1, size), src, ", ", addr]
-                })
+                .map(|(i, st)| st_line(span!("{:2>}: ", i + 1), st))
                 .collect::<Vec<_>>(),
         );
         Clear.render(stq_area, buf);
         Widget::render(stq, stq_area, buf);
+
+        // Current request
+        let prefix = span!("Current: ");
+        match &self.stats.req {
+            ReqStats::None => line![prefix, span!("‒")],
+            ReqStats::Ld(ld) => ld_line(prefix, ld),
+            ReqStats::St(st) => st_line(prefix, st),
+        }
+        .render(req_area, buf);
     }
 }

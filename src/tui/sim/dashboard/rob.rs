@@ -5,6 +5,7 @@ use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::macros::{line, span};
+use ratatui::style::Stylize;
 use ratatui::widgets::StatefulWidget;
 
 pub struct Rob(UopList<Stats>);
@@ -30,10 +31,14 @@ impl<'a> StatefulWidget for &'a Rob {
         self.0.render(
             |stats| {
                 stats.iter().map(|entry| {
-                    line![
+                    let mut line = line![
                         span!("{:#}: ", AddrView(entry.addr)),
                         entry.display.as_span()
-                    ]
+                    ];
+                    if entry.flushed {
+                        line = line.crossed_out().dark_gray()
+                    }
+                    line
                 })
             },
             area,

@@ -7,6 +7,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::macros::vertical;
+use ratatui::style::{Style, Stylize};
 use ratatui::symbols;
 use ratatui::text::ToLine;
 use ratatui::widgets::{StatefulWidget, Tabs, Widget};
@@ -80,8 +81,8 @@ impl Sim {
         nav.push_back(("Tab", "Change tab"));
 
         let content_area = Rect {
-            y: area.y + 2,
-            height: area.height - 2,
+            y: area.y.saturating_add(1),
+            height: area.height.saturating_sub(1),
             ..area
         };
         match self.tabs {
@@ -94,7 +95,8 @@ impl Sim {
         //TODO Prettier tabs
         Tabs::new(TabState::VARIANTS.iter().map(|v| v.to_line()))
             .select(self.tabs as usize)
-            .divider(symbols::DOT)
+            .divider(symbols::DOT.dark_gray())
+            .highlight_style(Style::default().magenta().bold())
             .render(area, buf);
     }
 }

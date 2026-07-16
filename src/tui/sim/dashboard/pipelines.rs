@@ -8,6 +8,7 @@ use crate::core::{
 };
 use crate::tui::{
     components::scroll_view::{ScrollView, ScrollViewState},
+    focus::Focusable,
     sim::AddrView,
 };
 use crossterm::event::{KeyCode, KeyEvent};
@@ -65,38 +66,19 @@ impl Pipelines {
         match event {
             key_event!(KeyCode::Up) => scroll.scroll_up(),
             key_event!(KeyCode::Down) => scroll.scroll_down(),
-            key_event!(KeyCode::Left) => match self.selected.checked_sub(1) {
-                Some(new) => {
-                    self.selected = new;
-                    for _ in 0..LINE_WIDTH {
-                        scroll.scroll_left()
-                    }
+            key_event!(KeyCode::Left) => {
+                self.selected = self.selected.saturating_sub(1);
+                for _ in 0..LINE_WIDTH {
+                    scroll.scroll_left();
                 }
-                None => {
-                    self.selected = self.line_count.saturating_sub(1);
-                    for _ in 0..LINE_WIDTH as usize * self.line_count {
-                        scroll.scroll_right();
-                    }
-                }
-            },
+            }
             key_event!(KeyCode::Right) => {
-                match self
+                self.selected = self
                     .selected
-                    .checked_add(1)
-                    .and_then(|i| (i < self.line_count).then_some(i))
-                {
-                    Some(new) => {
-                        self.selected = new;
-                        for _ in 0..LINE_WIDTH {
-                            scroll.scroll_right()
-                        }
-                    }
-                    None => {
-                        self.selected = 0;
-                        for _ in 0..LINE_WIDTH as usize * self.line_count {
-                            scroll.scroll_left();
-                        }
-                    }
+                    .saturating_add(1)
+                    .min(self.line_count.saturating_sub(1));
+                for _ in 0..LINE_WIDTH {
+                    scroll.scroll_right();
                 }
             }
             _ => return false,
@@ -143,7 +125,7 @@ impl<'a> StatefulWidget for &'a Pipelines {
         }
 
         let mut scroll_view =
-            ScrollView::new(Size::new(scroll_view_width, height)).focus(state.is_some());
+            ScrollView::new(Size::new(scroll_view_width, height)).focus_if(state.is_some());
         let item_area = scroll_view.area().resize(Size::new(line_width, height));
 
         lines!(int)
@@ -172,6 +154,10 @@ pub struct Line {
 impl From<(&LineStats<IntReg>, &PrfStats<IntReg>)> for Line {
     fn from(((rs, eu), prf): (&LineStats<IntReg>, &PrfStats<IntReg>)) -> Self {
         use crate::core::uop::int::{EeUop as Uop, Src};
+        let read_base_reg = |reg: &RegOper<_>| match prf[*reg].as_ref() {
+            Some(val) => span!("{}", val.addr_view()),
+            None => span!("{}", reg.arch()).red(),
+        };
         let read_reg = |reg: &RegOper<_>| match prf[*reg].as_ref() {
             Some(val) => span!("{}", val.s()),
             None => span!("{}", reg.arch()).red(),
@@ -216,7 +202,7 @@ impl From<(&LineStats<IntReg>, &PrfStats<IntReg>)> for Line {
                         ]
                     }
                     Uop::Jalr { base, offset, .. } => {
-                        let base = read_reg(base);
+                        let base = read_base_reg(base);
                         line![span!("{:>2}: jalr {}(", i + 1, offset.s()), base, ")"]
                     }
                     Uop::Br {
@@ -237,11 +223,11 @@ impl From<(&LineStats<IntReg>, &PrfStats<IntReg>)> for Line {
                         ]
                     }
                     Uop::Lda { base, offset, .. } => {
-                        let base = read_reg(base);
+                        let base = read_base_reg(base);
                         line![span!("{:>2}: lda {}(", i + 1, offset.s()), base, ")"]
                     }
                     Uop::Sta { base, offset, .. } => {
-                        let base = read_reg(base);
+                        let base = read_base_reg(base);
                         line![span!("{:>2}: sta {}(", i + 1, offset.s()), base, ")"]
                     }
                     Uop::Csr { op, csr, src, dest } => {
@@ -275,12 +261,10 @@ impl Line {
 
 impl Widget for Line {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let mut block = Block::bordered()
+        let block = Block::bordered()
             .border_type(BorderType::Rounded)
-            .merge_borders(MergeStrategy::Fuzzy);
-        if self.selected {
-            block = block.cyan();
-        }
+            .merge_borders(MergeStrategy::Fuzzy)
+            .focus_if(self.selected);
 
         //TODO Proper EU area
         let [rs_area, eu_area] = vertical![*=1, ==0].spacing(Spacing::Overlap(1)).areas(area);

@@ -287,8 +287,16 @@ pub struct Config {
 
 #[derive(Debug, Clone)]
 pub struct Stats {
+    pub req: ReqStats,
     ldq: Box<[EntryStats<LdEntry>]>,
     stq: Box<[EntryStats<StEntry>]>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ReqStats {
+    None,
+    Ld(EntryStats<LdEntry>),
+    St(EntryStats<StEntry>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, derive_more::Deref)]
@@ -318,23 +326,27 @@ impl<M: DMem> MemSubsystem<M> {
             "cannot create statistics in the middle of a clock cycle"
         );
 
-        macro_rules! queue_stats {
-            ($queue:expr) => {{
-                $queue
-                    .iter()
-                    .map(|s| {
-                        let e = s.borrow();
-                        EntryStats {
-                            addr: e.addr.read(),
-                            size: e.size,
-                            fenced: !e.fence.is_none(),
-                            meta: e.meta,
-                        }
-                    })
-                    .collect()
+        macro_rules! entry_stats {
+            ($slot:expr) => {{
+                let e = $slot.borrow();
+                EntryStats {
+                    addr: e.addr.read(),
+                    size: e.size,
+                    fenced: !e.fence.is_none(),
+                    meta: e.meta,
+                }
             }};
         }
+        macro_rules! queue_stats {
+            ($queue:expr) => {{ $queue.iter().map(|s| entry_stats!(s)).collect() }};
+        }
+
         Stats {
+            req: match &self.req {
+                Req::None => ReqStats::None,
+                Req::Ld(_, s) => ReqStats::Ld(entry_stats!(s)),
+                Req::St(_, s) => ReqStats::St(entry_stats!(s)),
+            },
             ldq: queue_stats!(self.ldq),
             stq: queue_stats!(self.stq),
         }

@@ -53,6 +53,7 @@ macro_rules! focus_state {
 }
 
 pub mod components;
+pub mod focus;
 pub mod sim;
 
 pub fn run() -> color_eyre::Result<()> {

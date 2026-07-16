@@ -2,6 +2,7 @@
 //! to allow for styling the scrollbars;
 
 pub use self::state::ScrollViewState;
+use crate::tui::focus::FOCUS_COLOR;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Rect, Size};
 use ratatui::style::Style;
@@ -225,9 +226,9 @@ impl ScrollView<'_> {
         self
     }
 
-    pub fn focus(self, focus: bool) -> Self {
+    pub fn focus_if(self, focus: bool) -> Self {
         if focus {
-            self.scrollbars_style(Style::default().cyan())
+            self.scrollbars_style(FOCUS_COLOR)
         } else {
             self
         }

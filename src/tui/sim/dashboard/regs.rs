@@ -83,7 +83,7 @@ impl<'a> StatefulWidget for &'a IntRegs {
                 names[i].write(span!("{:>width$}", r, width = WIDTH));
                 spec[i].write(
                     s.as_ref()
-                        .map(|val| int_val(val).light_magenta())
+                        .map(|val| int_val(val).blue())
                         .unwrap_or_else(|| span!("{:>width$}", '?', width = WIDTH).red()),
                 );
                 comm[i].write(int_val(c).green());
@@ -105,7 +105,7 @@ impl<'a> StatefulWidget for &'a IntRegs {
                 .unwrap_or(0) as _,
             table_area.height.saturating_sub(1),
         ))
-        .focus(state.is_some());
+        .focus_if(state.is_some());
         let table = Table::new([Row::new(names), Row::new(spec), Row::new(comm)], widths)
             .column_spacing(SPACING)
             .flex(Flex::Start);

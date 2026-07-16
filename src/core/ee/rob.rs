@@ -134,20 +134,29 @@ pub struct Stats(Box<[EntryStats]>);
 pub struct EntryStats {
     pub kind: UopKind<Fence>,
     pub addr: Addr,
+    pub flushed: bool,
     #[cfg(feature = "tui")]
     pub display: decode::UopKind,
 }
 
 impl Rob {
     pub fn stats(&self) -> Stats {
+        let flushed = match self.flush.read_copied() {
+            Flush::None => None,
+            Flush::After(i) => Some(i + 1),
+            Flush::All => Some(0),
+        };
+
         Stats(
             self.queue
                 .iter()
-                .map(|s| {
+                .enumerate()
+                .map(|(i, s)| {
                     let e = s.borrow();
                     EntryStats {
                         kind: e.kind.read().into(),
                         addr: e.addr,
+                        flushed: flushed.is_some_and(|f| i >= f),
                         #[cfg(feature = "tui")]
                         display: e.display,
                     }

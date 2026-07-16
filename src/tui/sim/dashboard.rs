@@ -140,17 +140,16 @@ impl StatefulWidget for &Dashboard {
             }};
             ($( $stage:tt{$accessor:expr}($state:tt, $fallback_title:expr $(, $title:expr )*) ),*) => {
             $({
+                use $crate::tui::focus::Focusable;
                 ::paste::paste! {
-                    let mut [<$stage:lower _block>] = base_block.clone().title_top(
+                    let mut focused = state.take_if(|_| matches!(self.focus, Focus::$state));
+                    let [<$stage:lower _block>] = base_block.clone().title_top(
                         match base_block.inner([<$stage:lower _area>]).width as usize {
                             $( x if x >= $title.len() => $title, )*
                             _ => $fallback_title,
                         }
-                    );
-                    let mut focused = state.take_if(|_| matches!(self.focus, Focus::$state));
-                    if focused.is_some() {
-                        [<$stage:lower _block>] = [<$stage:lower _block>].cyan();
-                    }
+                    )
+                    .focus_if(focused.is_some());
                     let area = [<$stage:lower _block>].inner([<$stage:lower _area>]);
                     [<$stage:lower _block>].render([<$stage:lower _area>], buf);
                     Clear.render(area, buf);
@@ -168,15 +167,9 @@ impl StatefulWidget for &Dashboard {
             Predecode(Predecode, "Predecode"),
             Decode(Decode, "Decode"),
             Rob(Rob, "ROB", "Reorder Buffer"),
-            Pipelines(Pipelines, "Pipelines")
+            Pipelines(Pipelines, "Pipelines"),
+            Mem(Mem, "Mem", "Memory Subsystem")
         ];
-        {
-            let mut focused = state.take_if(|_| matches!(self.focus, Focus::Mem));
-            self.mem.render(mem_area, buf, &mut focused);
-            if focused.is_some() {
-                state = focused;
-            }
-        }
         stage_blocks![Regs{self.int_regs}(IntRegs, "Regs", "Integer Registers", "Int Registers", "Int Regs")];
         let _ = state;
     }
