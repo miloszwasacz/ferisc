@@ -59,80 +59,91 @@ impl<H: MemHierarchy, D: Decoder> Core<H, D> {
         let addr_gen = self.addr_gen.lock();
         let mode = self.mode.read_copied();
 
-        //TODO Process tick
-        {
-            // Fetch
-            let fetch = self.fetch.fetch(
-                self.hier.imem_mut(),
-                addr_gen.clone(),
-                self.predecode.lock(),
-            );
+        ferisc_macros::pipeline! {
 
-            // Decode
-            PipelineStage::new(fetch)
-                .substage(self.decode.decode(&self.csrf, addr_gen.clone(), mode))
-                .execute();
-        }
-
-        match self.rob.access() {
-            RobAccess::Ok(mut rob) => {
-                // Rename/Dispatch
-                let (rename, dispatch) = self.pipelines.input_locks();
-                self.decode
-                    .lock()
-                    .into_pipeline_stage()
-                    .copied()
-                    .substage(rename)
-                    .substage(rob.dispatch())
-                    .substage(self.mem.dispatch())
-                    .substage(dispatch)
-                    .execute();
-
-                // Issue & Execute
-                let mut addr_bypass = AddrBypassBuilder::default();
-                let mut bypass = self.pipelines.tick(
-                    &mut rob,
-                    &mut addr_bypass,
-                    &mut self.csrf,
+            // Fetch & Decode
+            stage {
+                self.fetch.fetch(
+                    self.hier.imem_mut(),
                     addr_gen.clone(),
-                );
+                    self.predecode.lock(),
+                )
+                .into_pipeline_stage()
+                .substage(self.decode.decode(&self.csrf, addr_gen.clone(), mode))
+            },
 
-                // Memory Access
-                self.mem
-                    .tick(self.hier.dmem_mut(), addr_bypass.build(), &mut bypass);
+            select self.rob.access() {
+                RobAccess::Ok(mut rob) => {
 
-                // Commit
-                rob.commit(&mut self.csrf, addr_gen.clone(), &mut self.mode)
-                    .into_pipeline_stage()
-                    .substage(self.pipelines.commit())
-                    .execute();
-            }
-            RobAccess::FlushSome(flush) => {
-                flush
-                    .into_pipeline_stage()
-                    .substage(self.pipelines.flush())
-                    .substage(self.mem.flush(self.hier.dmem_mut()))
-                    .transform(|_| ())
-                    .execute();
-            }
-            RobAccess::FlushAll(_) => {
-                self.pipelines.clear();
-                self.mem.flush_all(self.hier.dmem_mut());
-            }
+                    // Rename/Dispatch
+                    stage {
+                        let (rename, dispatch) = self.pipelines.input_locks();
+                        self.decode
+                            .lock()
+                            .into_pipeline_stage()
+                            .copied()
+                            .substage(rename)
+                            .substage(rob.dispatch())
+                            .substage(self.mem.dispatch())
+                            .substage(dispatch)
+                    },
+
+                    // Issue, Execute & Memory Access
+                    custom {
+                        // Issue & Execute
+                        let mut addr_bypass = AddrBypassBuilder::default();
+                        let mut bypass = self.pipelines.tick(
+                            &mut rob,
+                            &mut addr_bypass,
+                            &mut self.csrf,
+                            addr_gen.clone(),
+                        );
+
+                        // Memory Access
+                        self.mem
+                            .tick(self.hier.dmem_mut(), addr_bypass.build(), &mut bypass);
+                    },
+
+                    // Commit
+                    stage {
+                        rob.commit(&mut self.csrf, addr_gen.clone(), &mut self.mode)
+                            .into_pipeline_stage()
+                            .substage(self.pipelines.commit())
+                    }
+                },
+
+                RobAccess::FlushSome(flush) => stage {
+                    flush
+                        .into_pipeline_stage()
+                        .substage(self.pipelines.flush())
+                        .substage(self.mem.flush(self.hier.dmem_mut()))
+                        .transform(|_| ())
+                },
+
+                RobAccess::FlushAll(_) => custom {
+                    self.pipelines.clear();
+                    self.mem.flush_all(self.hier.dmem_mut());
+                }
+            },
+
+            // Implicit CSR updates
+            custom {
+                let cycle = self.csrf.mcycle.read();
+                self.csrf.mcycle.implicit_write(cycle + 1);
+            },
         }
 
-        let cycle = self.csrf.mcycle.read();
-        self.csrf.mcycle.implicit_write(cycle + 1);
-
-        // Flush
-        //TODO How to update BTB and BP when flushing?
-        let flush = addr_gen.apply();
-        if flush.flush_fetch() {
-            self.fetch.clear(self.hier.imem_mut().deref_mut());
-            self.predecode.clear();
-        }
-        if flush.flush_decode() {
-            self.decode.clear();
+        // Front-End flushing
+        {
+            //TODO How to update BTB and BP when flushing?
+            let flush = addr_gen.apply();
+            if flush.flush_fetch() {
+                self.fetch.clear(self.hier.imem_mut().deref_mut());
+                self.predecode.clear();
+            }
+            if flush.flush_decode() {
+                self.decode.clear();
+            }
         }
     }
 }

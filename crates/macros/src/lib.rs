@@ -39,3 +39,4 @@ macro_rules! create_derive {
 create_macro!(bitfields);
 create_derive!(ArchReg, attributes(hardwired));
 create_macro!(csr_file);
+create_macro!(pipeline);
