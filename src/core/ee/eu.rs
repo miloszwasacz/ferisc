@@ -94,7 +94,7 @@ impl<U: Execute> Eu<U> {
         #[cfg(debug_assertions)]
         {
             assert!(
-                self.state.intersects(State::CLEARED),
+                !self.state.intersects(State::CLEARED),
                 "cannot flush and issue or execute in the same clock cycle"
             );
             self.state.insert(State::CLEARED);
@@ -146,7 +146,7 @@ impl<U> Clearable for Eu<U> {
         #[cfg(debug_assertions)]
         {
             assert!(
-                self.state.intersects(State::CLEARED),
+                !self.state.intersects(State::CLEARED),
                 "cannot flush and issue or execute in the same clock cycle"
             );
             self.state.insert(State::CLEARED);

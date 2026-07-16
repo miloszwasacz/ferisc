@@ -57,7 +57,7 @@ impl<U> Rs<U> {
         #[cfg(debug_assertions)]
         {
             assert!(
-                self.state.intersects(State::CLEARED),
+                !self.state.intersects(State::CLEARED),
                 "cannot flush and dispatch or issue in the same clock cycle"
             );
             self.state.insert(State::CLEARED);
@@ -86,7 +86,7 @@ impl<U> Clearable for Rs<U> {
         #[cfg(debug_assertions)]
         {
             assert!(
-                self.state.intersects(State::CLEARED),
+                !self.state.intersects(State::CLEARED),
                 "cannot flush and dispatch or issue in the same clock cycle"
             );
             self.state.insert(State::CLEARED);

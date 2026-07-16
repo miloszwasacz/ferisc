@@ -79,6 +79,13 @@ impl_req! {
             })
         }
 
+        pub fn throw(&self, err: E) -> Self {
+            Self(Req {
+                state: ReqState::Error(err),
+                ..self.0
+            })
+        }
+
         pub fn state(&self) -> ReqState<(), &ReqData, &E> {
             match &self.0.state {
                 ReqState::Incomplete(()) => ReqState::Incomplete(()),
@@ -102,6 +109,13 @@ impl_req! {
         pub fn complete(&self) -> Self {
             Self(Req {
                 state: ReqState::Complete(()),
+                ..self.0
+            })
+        }
+
+        pub fn throw(&self, err: E) -> Self {
+            Self(Req {
+                state: ReqState::Error(err),
                 ..self.0
             })
         }

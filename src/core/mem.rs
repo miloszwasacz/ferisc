@@ -223,6 +223,11 @@ impl<M: DMem> Sequential for MemSubsystem<M> {
         self.ldq.finish_cycle();
         self.stq.finish_cycle();
         self.fence.finish_cycle();
+        match &mut self.req {
+            Req::None => {}
+            Req::Ld(_, s) => s.borrow_mut().addr.finish_cycle(),
+            Req::St(_, s) => s.borrow_mut().addr.finish_cycle(),
+        }
 
         #[cfg(debug_assertions)]
         {

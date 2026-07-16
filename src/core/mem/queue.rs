@@ -69,7 +69,7 @@ impl_both! {
         }
 
         pub fn flush(&mut self) {
-            self.queue.retain(|s| s.borrow().rob_entry.is_flushed());
+            self.queue.retain(|s| !s.borrow().rob_entry.is_flushed());
         }
     }
 }

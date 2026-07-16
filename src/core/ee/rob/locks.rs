@@ -166,6 +166,7 @@ enum Special {
 
 pub struct CommitLock<'r, 'c, 'g, 'm> {
     pop: PopLock<'r, Slot>,
+    committed: &'r mut usize,
     fences: &'r mut Vec<Rc<Fence>>,
     csrf: &'c mut CsrFile,
     addr_gen: addr_gen::Lock<'g>,
@@ -185,6 +186,7 @@ impl<'a, 'r: 'a, 'c, 'g, 'm> CommitLock<'a, 'c, 'g, 'm> {
         debug_assert!(rob.0.committed_fences.is_empty());
         Self {
             pop: rob.0.queue.pop(rob.0.commit_width.get() as _),
+            committed: &mut rob.0.committed,
             fences: &mut rob.0.committed_fences,
             csrf,
             addr_gen,
@@ -300,6 +302,7 @@ impl<'r, 'c, 'g, 'm> Transformer<'r> for CommitTrans<'r, 'c, 'g, 'm> {
         } = self.0.unwrap();
 
         pop.commit(&mut lock.pop);
+        *lock.committed += 1;
         lock.count += 1;
         debug_assert_matches!(lock.special, Special::None);
         lock.special = special;
@@ -321,7 +324,7 @@ pub struct FlushLock<'r>(
 impl<'a> FlushLock<'a> {
     pub(super) fn new(rob: &'a mut Rob, after: usize) -> Self {
         debug_assert!(rob.committed_fences.is_empty());
-        let from = (after + 1).max(rob.queue.len() - rob.flush_width.get());
+        let from = (after + 1).max(rob.queue.len().saturating_sub(rob.flush_width.get()));
         if from == after + 1 {
             rob.flush.clear();
         }

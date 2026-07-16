@@ -63,7 +63,7 @@ impl<M> Entry<M> {
         self.addr
             .bypassed
             .or_else(|| self.addr.buf.read_copied())
-            .map(|addr| addr..(addr + self.size as Addr))
+            .map(|addr| addr..addr.wrapping_add(self.size as Addr))
     }
 
     #[inline(always)]

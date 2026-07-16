@@ -20,12 +20,14 @@ type Slot = Rc<RefCell<Entry>>;
 #[derive(Debug)]
 pub struct Rob {
     queue: Queue<Slot>,
+    flush: Pbuf<Flush, FlushPriority>,
+    /// The number of instructions committed in this clock cycle.
+    committed: usize,
     /// A list of fences committed in this clock cycle.
     ///
     /// We need to keep track of them because the [`MemSubsystem`](crate::core::MemSubsystem)
     /// might still need them until the end of the clock cycle, keeping the `Rc` alive.
     committed_fences: Vec<Rc<Fence>>,
-    flush: Pbuf<Flush, FlushPriority>,
     commit_width: NonZeroU8,
     flush_width: NonZeroUsize,
 }
@@ -34,8 +36,9 @@ impl Rob {
     pub fn new(config: &Config) -> Self {
         Self {
             queue: Queue::new(config.size.get()),
-            committed_fences: Vec::new(),
             flush: Default::default(),
+            committed: 0,
+            committed_fences: Vec::new(),
             commit_width: config.commit_width,
             flush_width: config.flush_width.unwrap_or(config.size),
         }
@@ -57,7 +60,17 @@ impl Sequential for Rob {
             s.borrow_mut().kind.finish_cycle();
         }
         self.flush.finish_cycle();
-        drop(self.committed_fences.drain(..))
+        drop(self.committed_fences.drain(..));
+
+        // We need to adjust the index by the number of committed instructions.
+        let committed = std::mem::take(&mut self.committed);
+        if let Flush::After(after) = self.flush.read_copied()
+            && committed > 0
+        {
+            self.flush
+                .write(Flush::After(after - committed), FlushPriority::Commit);
+            self.flush.finish_cycle();
+        }
     }
 }
 

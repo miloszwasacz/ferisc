@@ -190,8 +190,20 @@ impl Sequential for Dram {
             |req| matches!(req.state(), ReqState::Incomplete(_)),
             |req| {
                 //TODO Latency
-                let data = self.mem[req.addr() as usize..][..req.size()].into();
-                req.complete(data)
+                std::debug_assert_matches!(
+                    req.state(),
+                    ReqState::Incomplete(()),
+                    "request should be incomplete"
+                );
+                let mem = self
+                    .mem
+                    .get(req.addr() as usize..)
+                    .and_then(|mem| mem.get(..req.size()));
+
+                match mem {
+                    Some(mem) => req.complete(mem.into()),
+                    None => req.throw(Exception::LdAccessFault),
+                }
             }
         );
         finish_for_conns!(
@@ -202,9 +214,18 @@ impl Sequential for Dram {
                 let ReqState::Incomplete(data) = req.state() else {
                     panic!("request should be incomplete")
                 };
-                let mem = &mut self.mem[req.addr() as usize..][..req.size()];
-                mem.copy_from_slice(data);
-                req.complete()
+                let mem = self
+                    .mem
+                    .get_mut(req.addr() as usize..)
+                    .and_then(|mem| mem.get_mut(..req.size()));
+
+                match mem {
+                    Some(mem) => {
+                        mem.copy_from_slice(data);
+                        req.complete()
+                    }
+                    None => req.throw(Exception::StAccessFault),
+                }
             }
         );
     }
