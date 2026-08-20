@@ -34,6 +34,8 @@ pub struct Buf<T> {
     value: T,
     state: BufState<T>,
     new: Option<T>,
+    #[cfg(debug_assertions)]
+    bypassed: std::cell::Cell<bool>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -54,6 +56,8 @@ impl<T> Buf<T> {
             value,
             state: BufState::default(),
             new: None,
+            #[cfg(debug_assertions)]
+            bypassed: Default::default(),
         }
     }
 
@@ -86,6 +90,39 @@ impl<T> Buf<T> {
         self.value
     }
 
+    /// Returns a reference to the data currently stored in the buffer,
+    /// bypassing any data [written](Self::write) in this clock cycle.
+    ///
+    /// # Imperativeness
+    ///
+    /// This method is inherently imperative - in order for a value to be bypassed,
+    /// it has to be [written](Self::write) first. In debug builds, this is enforced
+    /// by panicking if within a given clock cycle a new value is written after
+    /// this method has been called.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use ferisc::seq::{Buf, Sequential};
+    /// let mut buf = Buf::new(1);
+    /// buf.write(2);
+    ///
+    /// // Regular read yields the old data
+    /// assert_eq!(*buf.read(), 1);
+    ///
+    /// // Bypassing yields the new data
+    /// assert_eq!(*buf.read_bypassed(), 2);
+    /// ```
+    pub fn read_bypassed(&self) -> &T {
+        self.new
+            .as_ref()
+            .inspect(|_| {
+                #[cfg(debug_assertions)]
+                self.bypassed.set(true);
+            })
+            .unwrap_or_else(|| self.read())
+    }
+
     /// Schedules a new value to be written into the buffer at the end
     /// of the current clock cycle.
     ///
@@ -114,6 +151,9 @@ impl<T> Buf<T> {
     /// ```
     pub fn write(&mut self, value: T) {
         debug_assert!(self.new.is_none(), "buffer has already been written to");
+        #[cfg(debug_assertions)]
+        assert!(!self.bypassed.get(), "the buffer has already been bypassed");
+
         self.new = Some(value);
     }
 }
@@ -154,6 +194,9 @@ impl<T: Default> Default for Buf<T> {
 
 impl<T> Sequential for Buf<T> {
     fn finish_cycle(&mut self) {
+        #[cfg(debug_assertions)]
+        self.bypassed.take();
+
         let new = self.new.take();
         self.value = match mem::take(&mut self.state) {
             BufState::Enabled => match new {

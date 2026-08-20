@@ -1,39 +1,104 @@
-pub use self::lock::PredecodeLock;
-use crate::core::{fe::fetch::FetchUnit, mem::IMem, uop::predecode::Predecoded};
+use self::substage::{In, Out};
+use crate::core::uop::predecode::Predecoded;
 use crate::seq::{Buf, Clearable, Sequential};
 use const_format::str_repeat;
 use core::fmt;
 use std::collections::VecDeque;
+use std::num::NonZeroUsize;
 
-mod lock;
+pub mod substage;
 
 type CrossBlock = Option<[u8; 2]>;
 
+#[derive(Debug)]
+pub struct PredecodeUnit {
+    cross_block: Buf<CrossBlock>,
+    out_queue: Queue,
+    //TODO Different IN and OUT widths
+    width: NonZeroUsize,
+    state: State,
+}
+
+#[derive(Debug, derive_more::Deref, derive_more::DerefMut)]
+struct Queue {
+    #[deref]
+    #[deref_mut]
+    buf: VecDeque<Predecoded>,
+    len: usize,
+}
+
 #[derive(Debug, Default)]
-pub struct Predecoder(Buf<CrossBlock>);
+struct State {
+    popped: usize,
+    cleared: bool,
+}
 
-impl Predecoder {
-    pub fn lock(&mut self) -> PredecodeLock<'_> {
-        let cross = self.0.read_copied();
-        PredecodeLock::new(self, cross)
+impl PredecodeUnit {
+    pub fn new(config: &Config) -> Self {
+        Self {
+            cross_block: Default::default(),
+            out_queue: Queue::new(config.queue_size.unwrap_or(config.width)),
+            width: config.width,
+            state: Default::default(),
+        }
+    }
+
+    pub fn r#in(&mut self) -> In<'_> {
+        In::new(self)
+    }
+
+    pub fn out(&mut self) -> Out<'_> {
+        Out::new(self)
     }
 }
 
-impl Sequential for Predecoder {
+impl Queue {
+    fn new(size: NonZeroUsize) -> Self {
+        Self {
+            buf: VecDeque::with_capacity(size.get()),
+            len: 0,
+        }
+    }
+}
+
+impl Sequential for PredecodeUnit {
     fn finish_cycle(&mut self) {
-        self.0.finish_cycle();
+        use std::mem::take;
+
+        // Pop
+        {
+            let popped = take(&mut self.state.popped);
+            drop(self.out_queue.drain(..popped));
+        }
+
+        // Clear
+        if take(&mut self.state.cleared) {
+            self.out_queue.clear();
+            self.cross_block.clear();
+        }
+
+        // Misc
+        self.out_queue.len = self.out_queue.len();
+        self.cross_block.finish_cycle();
     }
 }
 
-impl Clearable for Predecoder {
+impl Clearable for PredecodeUnit {
     fn clear(&mut self) {
-        self.0.clear();
+        self.state.cleared = true;
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Config {
+    pub width: NonZeroUsize,
+    //TODO Add a note that queue_size >= width
+    pub queue_size: Option<NonZeroUsize>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Stats {
-    predecoded: VecDeque<Predecoded>,
+    predecoded: Box<[Predecoded]>,
     cross_block: CrossBlock,
 }
 
@@ -47,11 +112,16 @@ impl Stats {
     }
 }
 
-impl Predecoder {
-    pub fn stats<M: IMem>(&self, fetch: &FetchUnit<M>) -> Stats {
+impl PredecodeUnit {
+    pub fn stats(&self) -> Stats {
         Stats {
-            predecoded: fetch.predecode_stats().clone(),
-            cross_block: self.0.read_copied(),
+            predecoded: self
+                .out_queue
+                .iter()
+                .take(self.out_queue.len)
+                .copied()
+                .collect(),
+            cross_block: self.cross_block.read_copied(),
         }
     }
 }

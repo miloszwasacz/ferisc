@@ -1,4 +1,5 @@
 use generic_array::ArrayLength;
+use std::fmt;
 use std::hash::Hash;
 use strum::VariantArray;
 
@@ -27,5 +28,5 @@ pub trait ArchRegCount {
 
     /// The total number of architectural registers of a given kind as an
     /// associated type to be used by [`generic_array::GenericArray`].
-    type COUNT: ArrayLength<ArrayType<usize>: Copy> + core::fmt::Debug + Copy;
+    type COUNT: ArrayLength<ArrayType<usize>: Copy> + fmt::Debug + Copy;
 }

@@ -20,6 +20,8 @@ bitflags! {
 }
 
 impl Fence {
+    pub const NONE: Self = Self(Fields::empty());
+
     pub fn decode(fields: u8) -> Self {
         Self(Fields::from_bits_truncate(fields))
     }
@@ -45,8 +47,16 @@ impl Fence {
         self.0.intersects(Fields::PI | Fields::PR)
     }
 
+    pub(crate) fn pst(&self) -> bool {
+        self.0.intersects(Fields::PO | Fields::PW)
+    }
+
     pub(crate) fn sld(&self) -> bool {
         self.0.intersects(Fields::SI | Fields::SR)
+    }
+
+    pub(crate) fn sst(&self) -> bool {
+        self.0.intersects(Fields::SO | Fields::SW)
     }
 }
 

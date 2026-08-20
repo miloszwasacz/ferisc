@@ -1,9 +1,8 @@
 use proc_macro::TokenStream;
-use quote::{quote, quote_spanned};
+use quote::quote;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
-use syn::spanned::Spanned;
-use syn::{Block, Expr, Pat, Token, braced, parse_macro_input};
+use syn::{Block, Expr, Pat, Token, braced, bracketed, parse_macro_input, token};
 
 pub fn proc_macro(input: TokenStream) -> TokenStream {
     let pipeline = parse_macro_input!(input as Pipeline);
@@ -18,11 +17,25 @@ fn quote_pipeline(pipeline: &Pipeline) -> proc_macro2::TokenStream {
 fn quote_item(item: &Item) -> proc_macro2::TokenStream {
     match item {
         Item::Stage(stage) => {
-            let stage = &stage.0;
-            quote_spanned! { stage.span() => {
-                let __stage: PipelineStage<_> = #stage;
-                __stage.execute();
-            }}
+            let decls = quote_decls(&stage.decls);
+            let body = &stage.body;
+            quote! {
+                {
+                    #( #decls )*
+                    let __stage: PipelineStage<_> = #body;
+                    __stage.execute();
+                }
+            }
+        }
+        Item::With(with) => {
+            let decls = quote_decls(&with.decls);
+            let pipeline = quote_pipeline(&with.pipeline);
+            quote! {
+                {
+                    #( #decls )*
+                    #pipeline
+                }
+            }
         }
         Item::Select(select) => {
             let expr = &select.expr;
@@ -37,20 +50,27 @@ fn quote_item(item: &Item) -> proc_macro2::TokenStream {
             quote! {
                 match #expr {
                     #( #arms ),*
-                };
+                }
             }
         }
         Item::Custom(custom) => {
             let custom = &custom.0;
-            quote! { #custom }
+            quote! {{ #custom }}
         }
     }
+}
+
+fn quote_decls(decls: &Decls) -> impl Iterator<Item = proc_macro2::TokenStream> {
+    decls.iter().map(|Decl { pat, init }| {
+        quote! { let #pat = #init; }
+    })
 }
 
 //#region Parsing
 
 mod kw {
     syn::custom_keyword!(stage);
+    syn::custom_keyword!(with);
     syn::custom_keyword!(select);
     syn::custom_keyword!(custom);
 }
@@ -59,11 +79,27 @@ struct Pipeline(pub Punctuated<Item, Token![,]>);
 
 enum Item {
     Stage(Stage),
+    With(With),
     Select(Select),
     Custom(Custom),
 }
 
-struct Stage(pub Block);
+struct Stage {
+    pub decls: Decls,
+    pub body: Block,
+}
+
+struct With {
+    pub decls: Decls,
+    pub pipeline: Pipeline,
+}
+
+type Decls = Punctuated<Decl, Token![,]>;
+
+struct Decl {
+    pub pat: Pat,
+    pub init: Expr,
+}
 
 struct Select {
     pub expr: Expr,
@@ -92,12 +128,14 @@ impl Parse for Item {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         if input.peek(kw::stage) {
             input.parse().map(Item::Stage)
+        } else if input.peek(kw::with) {
+            input.parse().map(Item::With)
         } else if input.peek(kw::select) {
             input.parse().map(Item::Select)
         } else if input.peek(kw::custom) {
             input.parse().map(Item::Custom)
         } else {
-            Err(input.error("expected `stage` or `select`"))
+            Err(input.error("expected `stage`, `with`, `select`, or `custom`"))
         }
     }
 }
@@ -105,7 +143,42 @@ impl Parse for Item {
 impl Parse for Stage {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         input.parse::<kw::stage>()?;
-        input.parse().map(Self)
+        let decls = parse_decls(&input)?;
+        let body = input.parse()?;
+
+        Ok(Self { decls, body })
+    }
+}
+
+impl Parse for With {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        input.parse::<kw::with>()?;
+        let decls = parse_decls(&input)?;
+        let content;
+        braced!(content in input);
+        let pipeline = content.parse()?;
+
+        Ok(Self { decls, pipeline })
+    }
+}
+
+fn parse_decls(input: &ParseStream) -> syn::Result<Decls> {
+    if input.peek(token::Bracket) {
+        let decls;
+        bracketed!(decls in input);
+        Punctuated::parse_terminated(&decls)
+    } else {
+        Ok(Punctuated::new())
+    }
+}
+
+impl Parse for Decl {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let pat = Pat::parse_multi(input)?;
+        input.parse::<token::Eq>()?;
+        let init = input.parse()?;
+
+        Ok(Self { pat, init })
     }
 }
 

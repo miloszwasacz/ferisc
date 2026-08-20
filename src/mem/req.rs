@@ -1,6 +1,5 @@
 pub use self::buf::ReqBuf;
-use super::Addr;
-use std::sync::Arc;
+use super::{Addr, Bytes, Size};
 
 mod buf;
 
@@ -27,7 +26,7 @@ macro_rules! impl_req {
                 self.0.addr
             }
 
-            pub fn size(&self) -> usize {
+            pub fn size(&self) -> Size {
                 self.0.size
             }
 
@@ -40,7 +39,7 @@ macro_rules! impl_req {
     };
 }
 
-pub type ReqData = Arc<[u8]>;
+pub type ReqData = Bytes;
 
 #[derive(Debug, Clone)]
 pub struct LdReq<E>(Req<ReqState<(), ReqData, E>>);
@@ -51,7 +50,7 @@ pub struct StReq<E>(Req<ReqState<ReqData, (), E>>);
 #[derive(Debug, Clone, Copy)]
 struct Req<S> {
     addr: Addr,
-    size: usize,
+    size: Size,
     state: S,
 }
 
@@ -64,7 +63,7 @@ pub enum ReqState<I, C, E> {
 
 impl_req! {
     impl<E> LdReq<E> {
-        pub fn new(addr: u64, size: usize) -> Self {
+        pub fn new(addr: u64, size: Size) -> Self {
             Self(Req {
                 addr,
                 size,
@@ -101,7 +100,7 @@ impl_req! {
         pub fn new(addr: u64, data: ReqData) -> Self {
             Self(Req {
                 addr,
-                size: data.len(),
+                size: data.size(),
                 state: ReqState::Incomplete(data),
             })
         }

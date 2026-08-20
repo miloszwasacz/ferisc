@@ -6,10 +6,10 @@ use crate::core::{
         phys::{RegOper, Stats as PrfStats},
     },
 };
+use crate::mem::AddrView;
 use crate::tui::{
     components::scroll_view::{ScrollView, ScrollViewState},
     focus::Focusable,
-    sim::AddrView,
 };
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::buffer::Buffer;
@@ -170,7 +170,7 @@ impl From<(&LineStats<IntReg>, &PrfStats<IntReg>)> for Line {
         let rs = Paragraph::new(
             rs.iter()
                 .enumerate()
-                .map(|(i, uop)| match &uop.kind {
+                .map(|(i, iuop)| match &iuop.uop {
                     Uop::Alu {
                         op,
                         src1,

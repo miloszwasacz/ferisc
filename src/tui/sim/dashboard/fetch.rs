@@ -1,10 +1,11 @@
 use super::Focused;
 use crate::core::fe::{addr_gen, fetch};
-use crate::tui::sim::AddrView;
+use crate::mem::AddrView;
 use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::macros::{line, span};
+use ratatui::style::Stylize;
 use ratatui::widgets::{Paragraph, StatefulWidget, Widget};
 
 pub struct Fetch {
@@ -39,9 +40,17 @@ impl<'a> StatefulWidget for &'a Fetch {
             )],
             line![
                 "Fetched PC: ",
-                match self.fetch.fetching {
-                    Some(pc) => span!("{:width$}", AddrView(pc)),
-                    None => span!(""),
+                match self.fetch {
+                    fetch::Stats::Idle => span!(""),
+                    fetch::Stats::Fetching(pc)
+                    | fetch::Stats::Fetched {
+                        addr: pc,
+                        exception: None,
+                    } => span!("{:width$}", AddrView(pc)),
+                    fetch::Stats::Fetched {
+                        addr: pc,
+                        exception: Some(_),
+                    } => span!("{:width$}", AddrView(pc)).yellow(),
                 }
             ],
         ]);

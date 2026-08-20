@@ -1,173 +1,119 @@
-use self::lock::Lock;
+use self::substage::Issue;
+pub use self::uop::Uop;
 use crate::core::{
     csr::CsrFile,
-    ee::{
-        rob::locks::ExecuteLock,
-        rs::{Bypass, BypassBuilder},
-    },
-    mem::AddrBypassBuilder,
-    reg::phys::Prf,
-    uop::execute::{Execute, Latency, Uop, WriteReg},
+    ee::rob,
+    uop::execute::{Jump, Latency, WriteReg},
 };
-use crate::seq::{Buf, Clearable, Sequential, locks::StageLock};
+use crate::seq::{Clearable, Pbuf, Sequential};
+use std::num::NonZero;
 
-mod lock;
+pub mod substage;
+mod uop;
 
 //TODO Pipelined EU
 #[derive(Debug, Clone)]
-pub struct Eu<U> {
-    uop: Option<Uop<U>>,
-    new: Option<Uop<U>>,
-    cycles: Buf<Latency>,
-    #[cfg(debug_assertions)]
-    state: State,
+pub struct Eu<U>(Pbuf<State<U>, Priority>);
+
+#[derive(Debug, Clone, Default)]
+enum State<U> {
+    #[default]
+    None,
+    Executing {
+        uop: U,
+        cycles_left: NonZero<Latency>,
+    },
 }
 
-impl<U: Execute> Eu<U> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum Priority {
+    Tick,
+    Issue,
+    Flush,
+}
+
+impl<U: Uop> Eu<U> {
     pub fn new(config: &Config) -> Self {
-        let _ = config;
-        Self {
-            uop: None,
-            new: None,
-            cycles: Default::default(),
-            #[cfg(debug_assertions)]
-            state: State::empty(),
-        }
+        let Config {} = config;
+        Self(Default::default())
     }
 
-    pub fn issue(
-        &mut self,
-        rob_lock: &mut ExecuteLock<'_, '_, '_>,
-        write_reg: impl WriteReg<U::Reg>,
-        addr_bypass: &mut AddrBypassBuilder,
-        csrf: &mut CsrFile,
-    ) -> impl StageLock<'_, Uop<U>, ()> {
-        #[cfg(debug_assertions)]
-        assert!(
-            !self.state.contains(State::ISSUED),
-            "cannot issue more than once in a single clock cycle"
+    pub fn issue<'a, J, W>(
+        &'a mut self,
+        jump: J,
+        write: W,
+        csrf: &'a mut CsrFile,
+    ) -> Issue<'a, U, J, W>
+    where
+        J: Jump,
+        W: WriteReg<U::Reg>,
+    {
+        Issue::new(self, jump, write, csrf)
+    }
+
+    pub fn execute(&mut self, jump: impl Jump, write: impl WriteReg<U::Reg>, csrf: &mut CsrFile)
+    where
+        U: Clone,
+    {
+        let State::Executing { uop, cycles_left } = self.0.read_bypassed() else {
+            return;
+        };
+        self.perform_tick(
+            uop.clone(),
+            cycles_left.get() - 1,
+            Priority::Tick,
+            jump,
+            write,
+            csrf,
         );
-
-        Lock::new(self, rob_lock, write_reg, addr_bypass, csrf)
     }
 
-    pub fn tick(
+    fn perform_tick(
         &mut self,
-        rob_lock: &mut ExecuteLock<'_, '_, '_>,
-        addr_bypass: &mut AddrBypassBuilder,
-        prf: &mut Prf<U::Reg>,
+        uop: U,
+        latency: Latency,
+        priority: Priority,
+        jump: impl Jump,
+        write: impl WriteReg<U::Reg>,
         csrf: &mut CsrFile,
-    ) -> Bypass<U::Reg> {
-        #[cfg(debug_assertions)]
-        {
-            assert!(
-                !self.state.contains(State::EXECUTED),
-                "cannot execute more than once in a single clock cycle"
-            );
-            self.state.insert(State::EXECUTED);
-        }
-
-        let mut bypass = BypassBuilder::new(prf);
-        match self.cycles.read_copied().checked_sub(1) {
+    ) {
+        let new = match NonZero::new(latency) {
+            Some(cycles_left) => State::Executing { uop, cycles_left },
             None => {
-                if let Some(Uop {
-                    kind: uop,
-                    rob_entry,
-                }) = self.uop.take()
-                {
-                    uop.execute(
-                        rob_entry,
-                        rob_lock,
-                        &mut |reg, val| bypass.write(reg, val),
-                        addr_bypass,
-                        csrf,
-                    );
-                }
+                uop.execute(jump, write, csrf);
+                State::None
             }
-            Some(cycles) => self.cycles.write(cycles),
-        }
-        bypass.build()
+        };
+        self.0.write(new, priority);
     }
 
     //TODO Document how `flush` is different from `clear` (i.e. flush vs flush all)
-    pub fn flush(&mut self) {
-        #[cfg(debug_assertions)]
-        {
-            assert!(
-                !self.state.intersects(State::CLEARED),
-                "cannot flush and issue or execute in the same clock cycle"
-            );
-            self.state.insert(State::CLEARED);
-        }
-        debug_assert!(self.new.is_none());
-
-        match self.uop.as_ref() {
-            None => debug_assert_eq!(self.cycles.read_copied(), Default::default()),
-            Some(uop) => {
-                if uop.rob_entry.is_flushed() {
-                    self.uop = None;
-                    self.cycles.clear();
-                }
-            }
-        }
-    }
-}
-
-impl<U> Default for Eu<U> {
-    fn default() -> Self {
-        Self {
-            uop: None,
-            new: None,
-            cycles: Default::default(),
-            #[cfg(debug_assertions)]
-            state: Default::default(),
+    pub fn flush(&mut self, flush: &rob::lock::Flush<'_>) {
+        let State::Executing { uop, .. } = self.0.read() else {
+            return;
+        };
+        if uop.is_flushed(flush) {
+            self.0.write(State::None, Priority::Flush);
         }
     }
 }
 
 impl<U> Sequential for Eu<U> {
+    /// Marks the end of the clock cycle, finalizing any outstanding operations.
+    ///
+    /// <div class="warning">
+    ///
+    /// This method updates the state of _ONLY_ the execution unit, not the contained uOP.
+    ///
+    /// </div>
     fn finish_cycle(&mut self) {
-        if let Some(new) = self.new.take() {
-            let old = self.uop.replace(new);
-            debug_assert!(old.is_none());
-        }
-        self.cycles.finish_cycle();
-
-        #[cfg(debug_assertions)]
-        {
-            use bitflags::Flags;
-            self.state.clear();
-        }
+        self.0.finish_cycle();
     }
 }
 
 impl<U> Clearable for Eu<U> {
     fn clear(&mut self) {
-        #[cfg(debug_assertions)]
-        {
-            assert!(
-                !self.state.intersects(State::CLEARED),
-                "cannot flush and issue or execute in the same clock cycle"
-            );
-            self.state.insert(State::CLEARED);
-        }
-        debug_assert!(self.new.is_none());
-
-        *self = Self {
-            #[cfg(debug_assertions)]
-            state: self.state,
-            ..Default::default()
-        };
-    }
-}
-
-#[cfg(debug_assertions)]
-bitflags::bitflags! {
-    #[derive(Debug, Clone, Copy, Default)]
-    struct State: u8 {
-        const ISSUED = 1 << 0;
-        const EXECUTED = 1 << 1;
-        const CLEARED = 1 << 2 | Self::ISSUED.bits() | Self::EXECUTED.bits();
+        self.0.clear();
     }
 }
 
@@ -175,22 +121,19 @@ bitflags::bitflags! {
 pub struct Config {}
 
 #[derive(Debug, Clone)]
-pub struct Stats<U>(Option<Uop<U>>);
+pub struct Stats<U>(Option<U>);
 
 impl<U> Stats<U> {
-    pub fn executing(&self) -> Option<&Uop<U>> {
+    pub fn executing(&self) -> Option<&U> {
         self.0.as_ref()
     }
 }
 
 impl<U: Clone> Eu<U> {
     pub fn stats(&self) -> Stats<U> {
-        #[cfg(debug_assertions)]
-        assert!(
-            self.state.is_empty(),
-            "cannot create statistics in the middle of a clock cycle"
-        );
-
-        Stats(self.uop.clone())
+        Stats(match self.0.read() {
+            State::None => None,
+            State::Executing { uop, .. } => Some(uop.clone()),
+        })
     }
 }

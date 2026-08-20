@@ -1,5 +1,5 @@
 use super::{
-    Addr, Mem,
+    Addr, Bytes, Mem,
     req::{LdReq, MemConn, ReqBuf, ReqData, ReqHandle, ReqState, StReq},
 };
 use crate::core::uop::Exception;
@@ -7,6 +7,8 @@ use crate::seq::Sequential;
 use std::pin::Pin;
 
 //TODO Proper DRAM simulation instead of simple emulation, with memory controller and different clocks
+
+//TODO Add a note about how the latency cannot be 0 (because registering a request takes 1 cycle)
 
 macro_rules! check_handle {
     ($handle:expr, $id:expr, $req_ty:ident) => {
@@ -69,6 +71,7 @@ impl Mem<LdReq<Exception>> for Dram {
         conn
     }
 
+    //TODO Add a note that the handle will only become valid in the next clock cycle
     fn req(&mut self, req: LdReq<Exception>, conn: Self::Conn) -> Self::Handle {
         self.ld_reqs.0[conn.0].write(req);
         ReqHandle {
@@ -119,6 +122,7 @@ impl Mem<StReq<Exception>> for Dram {
         conn
     }
 
+    //TODO Add a note that the handle will only become valid in the next clock cycle
     fn req(&mut self, req: StReq<Exception>, conn: Self::Conn) -> Self::Handle {
         self.st_reqs.0[conn.0].write(req);
         ReqHandle {
@@ -195,12 +199,12 @@ impl Sequential for Dram {
                     ReqState::Incomplete(()),
                     "request should be incomplete"
                 );
-                let mem = self
+                let bytes = self
                     .mem
                     .get(req.addr() as usize..)
-                    .and_then(|mem| mem.get(..req.size()));
+                    .and_then(|mem| Bytes::take_from(mem, req.size()));
 
-                match mem {
+                match bytes {
                     Some(mem) => req.complete(mem.into()),
                     None => req.throw(Exception::LdAccessFault),
                 }
@@ -214,18 +218,12 @@ impl Sequential for Dram {
                 let ReqState::Incomplete(data) = req.state() else {
                     panic!("request should be incomplete")
                 };
-                let mem = self
-                    .mem
-                    .get_mut(req.addr() as usize..)
-                    .and_then(|mem| mem.get_mut(..req.size()));
 
-                match mem {
-                    Some(mem) => {
-                        mem.copy_from_slice(data);
-                        req.complete()
-                    }
-                    None => req.throw(Exception::StAccessFault),
-                }
+                self.mem
+                    .get_mut(req.addr() as usize..)
+                    .and_then(|mem| data.write_into(mem))
+                    .map(|()| req.complete())
+                    .unwrap_or_else(|| req.throw(Exception::StAccessFault))
             }
         );
     }

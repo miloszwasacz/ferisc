@@ -1,7 +1,7 @@
 use self::dashboard::Dashboard;
 use self::nav::NavInfoBuilder;
-use crate::core::{Config, Core, mem::DirectHierarchy, reg::int::IntVal};
-use crate::mem::{Addr, Dram};
+use crate::core::{Config, Core, mem::hierarchy::direct::DirectHierarchy};
+use crate::mem::{Addr, Dram, ScalarSize, VectorSize};
 use crate::seq::Sequential;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::buffer::Buffer;
@@ -11,7 +11,6 @@ use ratatui::style::{Style, Stylize};
 use ratatui::symbols;
 use ratatui::text::ToLine;
 use ratatui::widgets::{StatefulWidget, Tabs, Widget};
-use std::fmt;
 use std::sync::{Arc, RwLock};
 use strum::{Display, VariantArray};
 
@@ -130,48 +129,11 @@ focus_state! {
     }
 }
 
-//#region AddrView
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct AddrView(pub Addr);
-
-impl AddrView {
-    /// The minimal width of the hexadecimal representation of the address
-    /// (excluding the _0x_ prefix).
-    pub const PRETTY_WIDTH: usize = 7;
-}
-
-impl fmt::Display for AddrView {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if !f.alternate() {
-            write!(f, "0x{:0width$x}", self.0, width = f.width().unwrap_or(0))
-        } else {
-            write!(
-                f,
-                "{:0width$x}",
-                self.0,
-                width = f
-                    .width()
-                    .map(|w| w.max(Self::PRETTY_WIDTH))
-                    .unwrap_or(Self::PRETTY_WIDTH)
-            )
-        }
-    }
-}
-
-impl IntVal {
-    pub fn addr_view(&self) -> AddrView {
-        AddrView(self.addr())
-    }
-}
-
-//#endregion
-
 //TODO Remove this
 fn make_core_config(entrypoint: Addr) -> Config {
     use crate::core::{
         ee::{eu, pipeline, rob, rs},
-        fe::{decode, fetch},
+        fe::{decode, fetch, predecode},
         mem,
     };
     use std::num::{NonZeroU8, NonZeroUsize};
@@ -179,10 +141,18 @@ fn make_core_config(entrypoint: Addr) -> Config {
     Config {
         entrypoint,
         fetch: fetch::Config {
-            packet_width: NonZeroU8::new(4 * size_of::<u32>() as u8).unwrap(),
+            packet_width: VectorSize {
+                unit: ScalarSize::Word,
+                count: NonZeroU8::new(4).unwrap(),
+            }
+            .into(),
+        },
+        predecode: predecode::Config {
+            width: NonZeroUsize::new(8).unwrap(),
+            queue_size: None,
         },
         decode: decode::Config {
-            width: NonZeroU8::new(4).unwrap(),
+            width: NonZeroUsize::new(4).unwrap(),
             queue_size: None,
         },
         rob: rob::Config {
@@ -204,6 +174,7 @@ fn make_core_config(entrypoint: Addr) -> Config {
         mem: mem::Config {
             ldq_size: NonZeroUsize::new(10).unwrap(),
             stq_size: NonZeroUsize::new(10).unwrap(),
+            max_fences: NonZeroUsize::new(1).unwrap(),
         },
     }
 }

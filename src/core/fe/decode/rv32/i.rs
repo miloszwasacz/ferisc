@@ -2,15 +2,17 @@ use super::fmt::*;
 use super::macros::*;
 use crate::core::{
     Mode,
+    fe::decode::exception,
     reg::int::IntVal,
     uop::{
-        Exception,
-        decode::{UopKind, int},
+        Exception, SpecialUopKind,
+        decode::{Kind, UopKind, int},
         fence::Fence,
         int::*,
         predecode::Meta,
     },
 };
+use crate::mem::{ScalarSize, Size};
 
 int_inst! {
     pub(in super::super) lui(fmt: U, _, _): Alu {
@@ -58,17 +60,17 @@ branch! {
 }
 
 load! {
-    pub(in super::super) lb(1, true)
-    pub(in super::super) lh(2, true)
-    pub(in super::super) lw(4, true)
-    pub(in super::super) lbu(1, false)
-    pub(in super::super) lhu(2, false)
+    pub(in super::super) lb(Byte, true)
+    pub(in super::super) lh(HalfWord, true)
+    pub(in super::super) lw(Word, true)
+    pub(in super::super) lbu(Byte, false)
+    pub(in super::super) lhu(HalfWord, false)
 }
 
 store! {
-    pub(in super::super) sb(1)
-    pub(in super::super) sh(2)
-    pub(in super::super) sw(4)
+    pub(in super::super) sb(Byte)
+    pub(in super::super) sh(HalfWord)
+    pub(in super::super) sw(Word)
 }
 
 int_inst! {
@@ -135,7 +137,7 @@ int_reg! {
 }
 
 pub(in super::super) fn fence(fmt: I, _: Meta, _: Mode) -> UopKind {
-    UopKind::MemOrd(Fence::decode(fmt.imm.u() as u8))
+    UopKind::Special(SpecialUopKind::MemOrd(Fence::decode(fmt.imm.u() as u8)))
 }
 
 pub(in super::super) fn fence_tso(fmt: I, meta: Meta, mode: Mode) -> UopKind {
@@ -145,29 +147,29 @@ pub(in super::super) fn fence_tso(fmt: I, meta: Meta, mode: Mode) -> UopKind {
 
 pub(in super::super) fn pause(_: I, _: Meta, _: Mode) -> UopKind {
     //TODO Pause
-    UopKind::Except(Exception::Illegal)
+    exception(Exception::Illegal)
 }
 
 pub(in super::super) fn ecall(_: I, _: Meta, mode: Mode) -> UopKind {
-    UopKind::Except(match mode {
+    exception(match mode {
         Mode::M => Exception::EcallM,
     })
 }
 
 pub(in super::super) fn ebreak(_: I, _: Meta, _: Mode) -> UopKind {
-    UopKind::Except(Exception::Breakpoint)
+    exception(Exception::Breakpoint)
 }
 
 pub(in super::super) fn mret(_: I, _: Meta, mode: Mode) -> UopKind {
     if mode != Mode::M {
-        return UopKind::Except(Exception::Illegal);
+        return exception(Exception::Illegal);
     }
     todo!("mret")
 }
 
 pub(in super::super) fn wfi(_: I, _: Meta, mode: Mode) -> UopKind {
     if mode != Mode::M {
-        return UopKind::Except(Exception::Illegal);
+        return exception(Exception::Illegal);
     }
     todo!("wfi")
 }

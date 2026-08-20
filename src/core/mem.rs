@@ -1,21 +1,19 @@
-// pub use self::cached::CachedHierarchy;
-pub use self::direct::DirectHierarchy;
-use self::entry::Entry;
-pub use self::entry::{AddrBypass, AddrBypassBuilder, AddrHandle, LdEntry, Src, StEntry};
-use self::locks::{DispatchLock, FlushLock};
+pub use self::entry::{
+    AddrHandle, Ld, ReadyStats as ReadyEntryStats, Src, St, Stats as EntryStats,
+};
+use self::entry::{Entry, ReadyEntry};
+use self::fence::FenceQueue;
+use self::hierarchy::DMem;
 use self::queue::Queue;
+pub use self::substage::{Commit, Dispatch};
 use crate::core::{
-    ee::{pipeline::BypassNetwork, rob::uop::FenceHandle},
-    reg::int::IntVal,
+    ee::rob::{self, Flushed},
     uop::{Exception, commit::Dest},
 };
-use crate::mem::{Addr, LdReq, Mem, ReqData, StReq};
-use crate::seq::{Buf, Sequential};
-use static_assertions::const_assert_eq;
-use std::cell::RefCell;
+use crate::mem::{Bytes, LdReq, Mem, ReqData, Size, StReq};
+use crate::seq::{Clearable, Sequential};
+use itertools::{EitherOrBoth, Itertools};
 use std::num::NonZeroUsize;
-use std::ops::{Deref, DerefMut};
-use std::rc::Rc;
 
 macro_rules! ld_mem {
     (<$mem:ty>::$( $tail:tt )*) => {
@@ -28,193 +26,180 @@ macro_rules! st_mem {
     };
 }
 
-// mod cached;
-mod direct;
 mod entry;
-pub mod locks;
+mod fence;
+pub mod hierarchy;
 mod queue;
-
-//#region Hierarchy
-
-pub trait MemHierarchy: Sequential {
-    type IMem: IMem;
-    type DMem: DMem;
-
-    fn imem(&self) -> impl Deref<Target = Self::IMem>;
-    fn imem_mut(&mut self) -> impl DerefMut<Target = Self::IMem>;
-    fn dmem(&self) -> impl Deref<Target = Self::DMem>;
-    fn dmem_mut(&mut self) -> impl DerefMut<Target = Self::DMem>;
-}
-
-pub trait IMem: Mem<LdReq<Exception>, Output = Result<ReqData, Exception>> {}
-impl<T: Mem<LdReq<Exception>, Output = Result<ReqData, Exception>>> IMem for T {}
-
-pub trait DMem:
-    Mem<LdReq<Exception>, Output = Result<ReqData, Exception>>
-    + Mem<StReq<Exception>, Output = Result<(), Exception>>
-{
-}
-impl<T> DMem for T where
-    T: Mem<LdReq<Exception>, Output = Result<ReqData, Exception>>
-        + Mem<StReq<Exception>, Output = Result<(), Exception>>
-{
-}
-
-//#endregion
+pub mod substage;
 
 //#region Memory Subsystem
-
-type Slot<T> = Rc<RefCell<Entry<T>>>;
 
 //TODO MMIO
 pub struct MemSubsystem<M: DMem> {
     ld_conn: ld_mem!(<M>::Conn),
     st_conn: st_mem!(<M>::Conn),
-    ldq: Queue<LdEntry>,
-    stq: Queue<StEntry>,
+    ldq: Queue<Ld>,
+    stq: Queue<St>,
     req: Req<M>,
-    fence: Buf<FenceHandle>,
-    #[cfg(debug_assertions)]
-    state: State,
+    fences: FenceQueue,
 }
 
 #[derive(Default)]
 enum Req<M: DMem> {
     #[default]
     None,
-    Ld(<M as Mem<LdReq<Exception>>>::Handle, Slot<LdEntry>),
-    St(<M as Mem<StReq<Exception>>>::Handle, Slot<StEntry>),
+    Ld(<M as Mem<LdReq<Exception>>>::Handle, ReadyEntry<Ld>),
+    St(<M as Mem<StReq<Exception>>>::Handle, ReadyEntry<St>),
 }
 
-impl<M: DMem> Req<M> {
-    pub fn or_else(self, f: impl FnOnce() -> Self) -> Self {
-        match self {
-            Req::None => f(),
-            req => req,
-        }
-    }
+#[derive(Debug, Clone)]
+pub struct LdResult {
+    pub dest: Dest,
+    pub signed: bool,
+    pub bytes: Bytes,
 }
 
 impl<M: DMem> MemSubsystem<M> {
-    pub fn new(config: &Config, mut dmem: impl DerefMut<Target = M>) -> Self {
-        let dmem = dmem.deref_mut();
+    pub fn new(config: &Config, dmem: &mut M) -> Self {
         Self {
             ld_conn: ld_mem!(<M>::register_conn(dmem)),
             st_conn: st_mem!(<M>::register_conn(dmem)),
-            ldq: Queue::new(config.ldq_size.get()),
-            stq: Queue::new(config.stq_size.get()),
+            ldq: Queue::new(config.ldq_size),
+            stq: Queue::new(config.stq_size),
             req: Req::None,
-            fence: Buf::new(FenceHandle::detached()),
-            #[cfg(debug_assertions)]
-            state: State::empty(),
+            fences: FenceQueue::new(config.max_fences),
         }
     }
 
-    pub fn dispatch(&mut self) -> DispatchLock<'_, M> {
-        #[cfg(debug_assertions)]
-        assert!(
-            !self.state.contains(State::DISPATCHED),
-            "cannot dispatch more than once in a clock cycle"
-        );
-
-        DispatchLock::new(self)
+    pub fn dispatch(&mut self) -> Dispatch<'_> {
+        Dispatch::new(self)
     }
 
     pub fn tick(
         &mut self,
-        mut dmem: impl DerefMut<Target = M>,
-        addr_bypass: AddrBypass,
-        prfs: &mut BypassNetwork<'_>,
+        dmem: &mut M,
+        try_read_bypassed: impl Fn(Src, Size) -> Option<ReqData>,
+        write: impl FnOnce(LdResult),
     ) {
-        let dmem = dmem.deref_mut();
-        let ld_prev = matches!(self.req, Req::Ld(_, _));
-
         // Update dependencies
-        self.ldq.update_deps(&addr_bypass);
-        self.stq.update_deps(&addr_bypass);
+        self.ldq.update_deps();
+        self.stq.update_deps();
 
-        // Handle current request
+        // Handle currently processed request
+        let ld_last = match std::mem::take(&mut self.req) {
+            Req::Ld(handle, entry) => {
+                match ld_mem!(<M>::take_if_ready(dmem, handle)) {
+                    Ok(Ok(bytes)) => {
+                        write(LdResult {
+                            dest: entry.dest(),
+                            signed: entry.signed(),
+                            bytes,
+                        });
+                        entry.into_rob_entry().mark_done();
+                    }
+                    Ok(Err(ex)) => entry.into_rob_entry().throw(ex),
+                    Err(handle) => {
+                        self.req = Req::Ld(handle, entry);
+                        return;
+                    }
+                }
+                true
+            }
+            Req::St(handle, entry) => {
+                match st_mem!(<M>::take_if_ready(dmem, handle)) {
+                    Ok(Ok(())) => {
+                        entry.into_rob_entry().mark_done();
+                    }
+                    Ok(Err(ex)) => entry.into_rob_entry().throw(ex),
+                    Err(handle) => {
+                        self.req = Req::St(handle, entry);
+                        return;
+                    }
+                }
+                false
+            }
+            Req::None => false,
+        };
+
+        // Schedule new request
+        debug_assert!(matches!(self.req, Req::None));
+        let mut schedule_ready = |try_ld| {
+            if try_ld {
+                self.ldq.schedule_ready(dmem, self.ld_conn)
+            } else {
+                self.stq
+                    .schedule_ready(dmem, self.st_conn, &try_read_bypassed)
+            }
+        };
+        let try_ld = !ld_last;
+        self.req = schedule_ready(try_ld);
+        if matches!(self.req, Req::None) {
+            self.req = schedule_ready(!try_ld);
+        }
+    }
+
+    pub fn commit(&mut self) -> Commit<'_> {
+        Commit::new(self)
+    }
+
+    pub fn flush(&mut self, dmem: &mut M, flush: &rob::lock::Flush<'_>) {
+        // Queues
+        self.ldq.flush(flush);
+        self.stq.flush(flush);
+
+        // Current request
         match std::mem::take(&mut self.req) {
-            Req::Ld(h, s) => match ld_mem!(<M>::take_if_ready(dmem, h)) {
-                Ok(Ok(data)) => {
-                    let mut entry = s.borrow_mut();
-                    write_ld_result(data, &entry, prfs);
-                    entry.rob_entry.mark_done();
+            Req::Ld(handle, entry) if entry.is_flushed(flush) => {
+                ld_mem!(<M>::kill(dmem, handle));
+            }
+            Req::St(handle, entry) if entry.is_flushed(flush) => {
+                st_mem!(<M>::kill(dmem, handle));
+            }
+            req => self.req = req,
+        }
+
+        // Fences
+        let flushed_fences = flush
+            .flushed()
+            .filter_map(|flushed| match flushed {
+                Flushed::MemOrd(fence) => Some(fence),
+                _ => None,
+            })
+            .zip_longest(self.fences.iter().rev())
+            .inspect(|fences| match fences {
+                EitherOrBoth::Both(flushed, fence) => {
+                    debug_assert_eq!(***fence, **flushed, "inconsistent fences")
                 }
-                Ok(Err(ex)) => {
-                    s.borrow_mut().rob_entry.throw(ex);
+                EitherOrBoth::Right(_) => {
+                    // Not all fences flushed
                 }
-                Err(h) => {
-                    self.req = Req::Ld(h, s);
-                    return;
-                }
-            },
-            Req::St(h, s) => match st_mem!(<M>::take_if_ready(dmem, h)) {
-                Ok(Ok(())) => {
-                    s.borrow_mut().rob_entry.mark_done();
-                }
-                Ok(Err(ex)) => {
-                    s.borrow_mut().rob_entry.throw(ex);
-                }
-                Err(h) => {
-                    self.req = Req::St(h, s);
-                    return;
-                }
-            },
+                EitherOrBoth::Left(_) => debug_assert!(
+                    false,
+                    "more fences flushed than tracked by the memory subsystem"
+                ),
+            })
+            .count();
+        let _ = self.fences.drain_back(flushed_fences);
+    }
+
+    pub fn flush_all(&mut self, dmem: &mut M) {
+        // Queues
+        self.ldq.clear();
+        self.stq.clear();
+
+        // Current request
+        match std::mem::take(&mut self.req) {
+            Req::Ld(handle, _) => {
+                ld_mem!(<M>::kill(dmem, handle));
+            }
+            Req::St(handle, _) => {
+                st_mem!(<M>::kill(dmem, handle));
+            }
             Req::None => {}
         }
 
-        // Make new request
-        debug_assert!(matches!(self.req, Req::None));
-        self.req = if !ld_prev {
-            self.ldq
-                .schedule_ready(dmem, self.ld_conn, &addr_bypass)
-                .or_else(|| {
-                    self.stq
-                        .schedule_ready(dmem, self.st_conn, &addr_bypass, prfs)
-                })
-        } else {
-            self.stq
-                .schedule_ready(dmem, self.st_conn, &addr_bypass, prfs)
-                .or_else(|| self.ldq.schedule_ready(dmem, self.ld_conn, &addr_bypass))
-        };
-    }
-
-    pub fn flush<D: DerefMut<Target = M>>(&mut self, dmem: D) -> FlushLock<'_, M, D> {
-        #[cfg(debug_assertions)]
-        assert!(
-            !self.state.intersects(State::FLUSHED),
-            "cannot flush and dispatch in the same clock cycle"
-        );
-
-        FlushLock::new(self, dmem)
-    }
-
-    pub fn flush_all(&mut self, mut dmem: impl DerefMut<Target = M>) {
-        #[cfg(debug_assertions)]
-        {
-            assert!(
-                !self.state.intersects(State::FLUSHED),
-                "cannot flush and dispatch in the same clock cycle"
-            );
-            self.state.insert(State::FLUSHED);
-        }
-
-        let dmem = dmem.deref_mut();
-        self.ldq.flush_all();
-        self.stq.flush_all();
-        self.flush_req(dmem);
-        debug_assert!(self.fence.read().get().is_none());
-    }
-
-    fn flush_req(&mut self, dmem: &mut M) {
-        match std::mem::take(&mut self.req) {
-            Req::Ld(h, s) if s.borrow().rob_entry.is_flushed() => ld_mem!(<M>::kill(dmem, h)),
-            Req::St(h, s) if s.borrow().rob_entry.is_flushed() => st_mem!(<M>::kill(dmem, h)),
-            req => {
-                self.req = req;
-            }
-        }
+        // Fences
+        self.fences.clear();
     }
 }
 
@@ -222,60 +207,7 @@ impl<M: DMem> Sequential for MemSubsystem<M> {
     fn finish_cycle(&mut self) {
         self.ldq.finish_cycle();
         self.stq.finish_cycle();
-        self.fence.finish_cycle();
-        match &mut self.req {
-            Req::None => {}
-            Req::Ld(_, s) => s.borrow_mut().addr.finish_cycle(),
-            Req::St(_, s) => s.borrow_mut().addr.finish_cycle(),
-        }
-
-        #[cfg(debug_assertions)]
-        {
-            use bitflags::Flags;
-            self.state.clear();
-        }
-    }
-}
-
-fn write_ld_result(result: ReqData, entry: &Entry<LdEntry>, bypass: &mut BypassNetwork<'_>) {
-    let data = result.as_ref();
-    match entry.dest {
-        Dest::Int(dest) => {
-            macro_rules! into_intval {
-                ($ctor:ident, $ty:ty) => {{
-                    IntVal::$ctor(<$ty>::from_le_bytes(data.try_into().unwrap_or_else(|_| {
-                        panic!(
-                            "invalid data size (expected: {}, actual: {})",
-                            size_of::<$ty>(),
-                            data.len(),
-                        )
-                    })) as _)
-                }};
-            }
-            let data = match entry.size {
-                1 if entry.signed => into_intval!(signed, i8),
-                1 => into_intval!(unsigned, u8),
-                2 if entry.signed => into_intval!(signed, i16),
-                2 => into_intval!(unsigned, u16),
-                4 if entry.signed => into_intval!(signed, i32),
-                4 => into_intval!(unsigned, u32),
-                8 => {
-                    const_assert_eq!(size_of::<Addr>(), 8);
-                    into_intval!(unsigned, u64)
-                }
-                s => panic!("unsupported integer size: {s}"),
-            };
-            bypass.int.write(*dest, data);
-        }
-    }
-}
-
-#[cfg(debug_assertions)]
-bitflags::bitflags! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    struct State: u8 {
-        const DISPATCHED = 1 << 0;
-        const FLUSHED = 1 << 1 | Self::DISPATCHED.bits();
+        self.fences.finish_cycle();
     }
 }
 
@@ -283,72 +215,43 @@ bitflags::bitflags! {
 pub struct Config {
     pub ldq_size: NonZeroUsize,
     pub stq_size: NonZeroUsize,
+    pub max_fences: NonZeroUsize,
 }
 
 #[derive(Debug, Clone)]
 pub struct Stats {
     pub req: ReqStats,
-    ldq: Box<[EntryStats<LdEntry>]>,
-    stq: Box<[EntryStats<StEntry>]>,
+    ldq: Box<[EntryStats<Ld>]>,
+    stq: Box<[EntryStats<St>]>,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum ReqStats {
     None,
-    Ld(EntryStats<LdEntry>),
-    St(EntryStats<StEntry>),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, derive_more::Deref)]
-pub struct EntryStats<M> {
-    pub addr: Option<Addr>,
-    pub size: usize,
-    pub fenced: bool,
-    #[deref]
-    pub meta: M,
+    Ld(ReadyEntryStats<Ld>),
+    St(ReadyEntryStats<St>),
 }
 
 impl Stats {
-    pub fn loads(&self) -> &[EntryStats<LdEntry>] {
+    pub fn loads(&self) -> &[EntryStats<Ld>] {
         &self.ldq
     }
 
-    pub fn stores(&self) -> &[EntryStats<StEntry>] {
+    pub fn stores(&self) -> &[EntryStats<St>] {
         &self.stq
     }
 }
 
 impl<M: DMem> MemSubsystem<M> {
     pub fn stats(&self) -> Stats {
-        #[cfg(debug_assertions)]
-        assert!(
-            self.state.is_empty(),
-            "cannot create statistics in the middle of a clock cycle"
-        );
-
-        macro_rules! entry_stats {
-            ($slot:expr) => {{
-                let e = $slot.borrow();
-                EntryStats {
-                    addr: e.addr.read(),
-                    size: e.size,
-                    fenced: !e.fence.is_none(),
-                    meta: e.meta,
-                }
-            }};
-        }
-        macro_rules! queue_stats {
-            ($queue:expr) => {{ $queue.iter().map(|s| entry_stats!(s)).collect() }};
-        }
-
         Stats {
             req: match &self.req {
                 Req::None => ReqStats::None,
-                Req::Ld(_, s) => ReqStats::Ld(entry_stats!(s)),
-                Req::St(_, s) => ReqStats::St(entry_stats!(s)),
+                Req::Ld(_, e) => ReqStats::Ld(e.stats()),
+                Req::St(_, e) => ReqStats::St(e.stats()),
             },
-            ldq: queue_stats!(self.ldq),
-            stq: queue_stats!(self.stq),
+            ldq: self.ldq.iter().map(Entry::stats).collect(),
+            stq: self.stq.iter().map(Entry::stats).collect(),
         }
     }
 }

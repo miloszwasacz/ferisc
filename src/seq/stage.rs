@@ -1,95 +1,124 @@
 //TODO Better docs with examples
-pub use self::lock::{CircuitLock, LockCompose};
-use self::map::{CopiedLock, TransLock};
-pub use self::trans::{TransCompose, Transformer};
+use self::substage::{Cloned, Compose, Copied, Map};
+pub use self::substage::{Outcome, SimpleSubStage, Substage};
+use std::convert::Infallible;
+use unwrap_infallible::UnwrapInfallible;
 
-mod lock;
-mod map;
-mod trans;
+pub mod substage;
 
 /// A transaction-based pipeline stage definition.
 ///
 /// This most useful for paths between two queues with some kind of transformation
 /// applied, such as decoding or register renaming.
-pub struct PipelineStage<T>(T);
+pub struct PipelineStage<S>(S);
 
-impl<'a, T: CircuitLock<'a>> PipelineStage<T> {
+impl<S> PipelineStage<S> {
     /// Starts a new pipeline stage definition.
     ///
     /// The definition has to start with a transformation that generates elements,
     /// such as popping them out of a queue.
     ///
     /// Note that a pipeline stage definition is lazy and the processing is only
-    /// started when [`execute`](Self::execute) is called.
-    pub fn new(lock: T) -> Self
+    /// started when [`PipelineStage::try_execute`] is called.
+    pub fn new(producer: S) -> Self
     where
-        T::Trans: Transformer<'a, In = ()>,
+        S: Substage<In = ()>,
     {
-        Self(lock)
+        Self(producer)
     }
 
-    /// Adds a new fallible substage within the pipeline stage.
+    /// Adds a new [`Substage`] within the pipeline stage.
     ///
     /// The substages are applied sequentially to the elements processed by the
     /// pipeline stage in the order of their definition. For more information on
-    /// the execution guarantees, see the [`execute`](Self::execute) method.
-    pub fn substage<U: CircuitLock<'a>>(self, lock: U) -> PipelineStage<LockCompose<T, U>> {
-        PipelineStage(LockCompose::new(self.0, lock))
+    /// the execution guarantees, see the [`PipelineStage::try_execute`] method.
+    pub fn substage<R, T, E>(self, substage: R) -> PipelineStage<Compose<S, R, E>>
+    where
+        S: Substage<Out = T, Err = E>,
+        R: Substage<In = T, Err = E>,
+    {
+        //TODO Add facilities to convert errors when necessary
+        PipelineStage(Compose::new(self.0, substage))
     }
 
-    /// Adds a new infallible substage which applies a simple transformation
-    /// to the elements without modifying any external state, similar to [`Iterator::map`].
-    pub fn transform<I, O, F>(self, f: F) -> PipelineStage<LockCompose<T, TransLock<I, O, F>>>
+    /// Adds a new infallible [`Substage`] which transforms the elements from
+    /// one type to another, similar to [`Iterator::map`].
+    pub fn map<T, U, F>(self, f: F) -> PipelineStage<Map<S, F>>
     where
-        T::Trans: Transformer<'a, Out = I>,
-        F: Fn(I) -> O,
+        S: Substage<Out = T>,
+        F: Fn(T) -> U,
     {
-        PipelineStage(LockCompose::new(self.0, TransLock::new(f)))
+        PipelineStage(Map::new(self.0, f))
     }
 
-    pub fn copied<U>(self) -> PipelineStage<LockCompose<T, CopiedLock<'a, U>>>
+    /// Adds a new infallible [`Substage`] which clones the elements,
+    /// similar to [`Iterator::cloned`].
+    pub fn cloned<'a, T>(self) -> PipelineStage<Cloned<S, T>>
     where
-        T::Trans: Transformer<'a, Out = &'a U>,
-        U: Copy,
+        S: Substage<Out = &'a T>,
+        T: Clone + 'a,
     {
-        PipelineStage(LockCompose::new(self.0, CopiedLock::copied()))
+        self.map(Clone::clone)
+    }
+
+    /// Adds a new infallible [`Substage`] which copies the elements,
+    /// similar to [`Iterator::copied`].
+    pub fn copied<'a, T>(self) -> PipelineStage<Copied<S, T>>
+    where
+        S: Substage<Out = &'a T>,
+        T: Copy + 'a,
+    {
+        self.map(|t| *t)
+    }
+
+    //TODO Example with a queue
+    /// Executes the pipeline stage.
+    ///
+    /// The execution proceeds by repeatedly trying to execute all substages -
+    /// first all substages apply their transformations in order of definition,
+    /// and if all of them [succeed](substage::Result::Ok), they are [applied](Apply::apply)
+    /// in reverse order; if at any point a substage [stops](substage::Result::Stopped)
+    /// or [fails](substage::Result::Error), the state from the current iteration
+    /// is discarded without getting applied, including all substages preceding
+    /// the stopping/failing substage. This means that a new iteration is only
+    /// started if all substages succeed and are applied.
+    pub fn try_execute<E>(mut self) -> Result<(), E>
+    where
+        S: Substage<In = (), Out = (), Err = E>,
+    {
+        loop {
+            match self.0.start(()) {
+                Outcome::Ok((), extra) => self.0.finish(extra),
+                Outcome::Stop => break Ok(()),
+                Outcome::Err(err) => break Err(err),
+            }
+        }
     }
 
     /// Executes the pipeline stage.
     ///
-    /// It is guaranteed that the transformations defined by individual
-    /// [`substages`](Self::substage) are executed in order of definition and
-    /// committed in reverse order. The execution proceeds until a transformation
-    /// fails (i.e. [`Transformer::transform`] returns [`None`]). When that happens,
-    /// the failing transformer is discarded, and its state is _not_ committed
-    /// to its associated [lock](CircuitLock). It is also guaranteed that if all
-    /// substages succeed for a given element, the changes will be committed to
-    /// the lock before a new element starts being processed.
-    pub fn execute(mut self)
+    /// This is a more restricted version of [`PipelineStage::try_execute`],
+    /// which cannot produce an error.
+    #[inline(always)]
+    pub fn execute(self)
     where
-        T::Trans: Transformer<'a, In = (), Out = ()>,
+        S: Substage<In = (), Out = (), Err = Infallible>,
     {
-        loop {
-            let mut trans = self.0.make_trans();
-            if trans.transform(&self.0, ()).is_some() {
-                trans.commit(&mut self.0);
-            } else {
-                break;
-            }
-        }
+        self.try_execute().unwrap_infallible()
     }
 }
 
-pub trait IntoPipelineStage {
-    fn into_pipeline_stage(self) -> PipelineStage<Self>
-    where
-        Self: Sized;
+/// A converter which can start a new [`PipelineStage`](PipelineStage::new)
+/// definition with `Self` as the producer.
+///
+/// This trait is automatically implemented for all types [`S: SubStage<In = ()>`](Substage).
+pub trait IntoPipelineStage: Substage<In = ()> + Sized {
+    /// Starts a new [`PipelineStage`](PipelineStage::new) definition with `self`
+    /// as the producer.
+    fn into_pipeline_stage(self) -> PipelineStage<Self>;
 }
 
-impl<'a, T> IntoPipelineStage for T
-where
-    T: CircuitLock<'a, Trans: Transformer<'a, In = ()>>,
-{
+impl<S: Substage<In = ()>> IntoPipelineStage for S {
     fn into_pipeline_stage(self) -> PipelineStage<Self> {
         PipelineStage::new(self)
     }

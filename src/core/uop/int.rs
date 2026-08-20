@@ -8,8 +8,7 @@ use crate::core::{
     },
     uop::fetch::BtbPred,
 };
-use crate::mem::Addr;
-use crate::tui::sim::AddrView;
+use crate::mem::{Addr, AddrView, Size};
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,14 +48,14 @@ pub enum FeUop<R, S, D> {
         btb_pred: BtbPred,
     },
     Ld {
-        size: usize,
+        size: Size,
         signed: bool,
         base: R,
         offset: IntVal,
         dest: D,
     },
     St {
-        size: usize,
+        size: Size,
         src: R,
         base: R,
         offset: IntVal,
@@ -201,13 +200,6 @@ pub enum CsrOp {
 impl<R: fmt::Display, S: fmt::Display, D: fmt::Display> fmt::Display for FeUop<R, S, D> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut width = if f.alternate() { INST_NAME_WIDTH } else { 0 };
-        let ld_st_size = |size| match size {
-            1 => "b",
-            2 => "h",
-            4 => "w",
-            8 => "d",
-            s => panic!("invalid size: {}", s),
-        };
         match self {
             Self::Alu {
                 op,
@@ -254,7 +246,6 @@ impl<R: fmt::Display, S: fmt::Display, D: fmt::Display> fmt::Display for FeUop<R
                 dest,
             } => {
                 width = width.saturating_sub(2);
-                let size = ld_st_size(*size);
                 let signed = if *signed {
                     ""
                 } else {
@@ -278,7 +269,6 @@ impl<R: fmt::Display, S: fmt::Display, D: fmt::Display> fmt::Display for FeUop<R
                 offset,
             } => {
                 width = width.saturating_sub(1);
-                let size = ld_st_size(*size);
                 write!(f, "s{:<width$} {}, {}({})", size, src, offset.s(), base)
             }
             Self::Csr { op, csr, src, dest } => {

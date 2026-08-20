@@ -1,4 +1,5 @@
 use super::InferUop;
+pub use crate::core::ee::pipeline::Kind;
 use crate::mem::Addr;
 
 #[derive(Debug, Clone, Copy)]

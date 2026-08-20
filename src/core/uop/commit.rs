@@ -1,6 +1,6 @@
-use crate::core::reg::{int::IntReg, phys::RegDest};
+use crate::core::{
+    ee::pipeline,
+    reg::{int::IntReg, phys::RegDest},
+};
 
-#[derive(Debug, Clone, Copy)]
-pub enum Dest {
-    Int(RegDest<IntReg>),
-}
+pub type Dest = pipeline::Kind<RegDest<IntReg>>;

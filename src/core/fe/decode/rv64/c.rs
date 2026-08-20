@@ -5,20 +5,21 @@ use crate::core::{
     fe::decode::fmt::*,
     reg::int::{IntReg, IntVal},
     uop::{
-        Exception,
-        decode::{UopKind, int},
+        Exception, SpecialUopKind,
+        decode::{Kind, UopKind, int},
         int::{AluOp, Src},
         predecode::Meta,
     },
 };
+use crate::mem::{ScalarSize, Size};
 
 fn c_ld(fmt: CL, _: Meta, _: Mode) -> UopKind {
     let imm6 = (fmt.imm5 & 0b11) << 6;
     let imm3 = (fmt.imm10 & 0b111) << 3;
     let offset = IntVal::unsigned((imm6 | imm3) as _);
 
-    UopKind::Int(int::Uop::Ld {
-        size: 8,
+    int_uop(int::Uop::Ld {
+        size: Size::Scalar(ScalarSize::DoubleWord),
         signed: true,
         base: fmt.rs1,
         offset,
@@ -31,8 +32,8 @@ fn c_sd(fmt: CS, _: Meta, _: Mode) -> UopKind {
     let imm3 = (fmt.imm10 & 0b111) << 3;
     let offset = IntVal::unsigned((imm6 | imm3) as _);
 
-    UopKind::Int(int::Uop::St {
-        size: 8,
+    int_uop(int::Uop::St {
+        size: Size::Scalar(ScalarSize::DoubleWord),
         src: fmt.rs2,
         base: fmt.rs1,
         offset,
@@ -49,7 +50,7 @@ fn c_addiw(fmt: CI, _: Meta, _: Mode) -> UopKind {
     let imm5 = imm_part!(1, imm_enc, sign extend) << 5;
     let imm = IntVal::signed((imm5 | imm0) as _);
 
-    UopKind::Int(int::Uop::Alu {
+    int_uop(int::Uop::Alu {
         op: AluOp::Addw,
         src1: Src::Reg(fmt.rd_rs1),
         src2: Src::Imm(imm),
@@ -58,7 +59,7 @@ fn c_addiw(fmt: CI, _: Meta, _: Mode) -> UopKind {
 }
 
 fn c_subw(fmt: CA, _: Meta, _: Mode) -> UopKind {
-    UopKind::Int(int::Uop::Alu {
+    int_uop(int::Uop::Alu {
         op: AluOp::Subw,
         src1: Src::Reg(fmt.rs2),
         src2: Src::Reg(fmt.rd_rs1),
@@ -67,7 +68,7 @@ fn c_subw(fmt: CA, _: Meta, _: Mode) -> UopKind {
 }
 
 fn c_addw(fmt: CA, _: Meta, _: Mode) -> UopKind {
-    UopKind::Int(int::Uop::Alu {
+    int_uop(int::Uop::Alu {
         op: AluOp::Addw,
         src1: Src::Reg(fmt.rs2),
         src2: Src::Reg(fmt.rd_rs1),
@@ -86,8 +87,8 @@ fn c_ldsp(fmt: CI, _: Meta, _: Mode) -> UopKind {
     let imm5 = fmt.imm12 & 0b1;
     let offset = IntVal::unsigned((imm6 | imm5 | imm3) as _);
 
-    UopKind::Int(int::Uop::Ld {
-        size: 8,
+    int_uop(int::Uop::Ld {
+        size: Size::Scalar(ScalarSize::DoubleWord),
         signed: true,
         base: IntReg::SP,
         offset,
@@ -101,8 +102,8 @@ fn c_sdsp(fmt: CSS, _: Meta, _: Mode) -> UopKind {
     let imm3 = imm_part!(3, imm_enc) << 3;
     let offset = IntVal::unsigned((imm6 | imm3) as _);
 
-    UopKind::Int(int::Uop::St {
-        size: 8,
+    int_uop(int::Uop::St {
+        size: Size::Scalar(ScalarSize::DoubleWord),
         src: fmt.rs2,
         base: IntReg::SP,
         offset,
@@ -122,6 +123,10 @@ pub fn decode(bytes: i16, meta: Meta, mode: Mode, ext: Extensions) -> Option<Uop
             None
         }
     })
+}
+
+const fn int_uop(uop: int::Uop) -> UopKind {
+    UopKind::Pipeline(Kind::Int(uop))
 }
 
 #[allow(unused_imports)]

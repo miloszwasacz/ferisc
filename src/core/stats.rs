@@ -21,8 +21,8 @@ impl<H: MemHierarchy, D: Decoder> Core<H, D> {
     pub fn stats(&self) -> Stats {
         Stats {
             addr_gen: self.addr_gen.stats(),
-            fetch: self.fetch.stats(self.hier.imem()),
-            predecode: self.predecode.stats(&self.fetch),
+            fetch: self.fetch.stats(),
+            predecode: self.predecode.stats(),
             decode: self.decode.stats(),
             rob: self.rob.stats(),
             pipelines: self.pipelines.stats(),

@@ -134,7 +134,9 @@ impl<'a> Lock<'a> {
 #[cfg(debug_assertions)]
 impl Drop for AddrGenLockImpl<'_> {
     fn drop(&mut self) {
-        assert!(self.applied, "address gen lock was not applied");
+        if !std::thread::panicking() {
+            assert!(self.applied, "address gen lock was not applied");
+        }
     }
 }
 

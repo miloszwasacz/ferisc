@@ -1,5 +1,5 @@
 use super::{ArchReg, ArchRegCount, RegRepr};
-use crate::mem::Addr;
+use crate::mem::{Addr, AddrView, Bytes, FromBytesSigned, Size, ToBytes};
 use ferisc_macros::ArchReg;
 use std::ops::{BitAnd, BitOr, Not, Shl, Shr};
 use strum::{Display, FromRepr, VariantArray};
@@ -149,6 +149,40 @@ impl IntVal {
     /// Returns the register value as a memory address.
     pub fn addr(&self) -> Addr {
         self.0 as _
+    }
+
+    pub fn addr_view(&self) -> AddrView {
+        AddrView(self.addr())
+    }
+}
+
+impl FromBytesSigned for IntVal {
+    fn from_bytes(bytes: Bytes, signed: bool) -> Self {
+        macro_rules! from_bytes {
+            ($bytes:expr, $width:literal) => {
+                ::paste::paste! {
+                    if signed {
+                        Self::signed([< i $width >]::from_le_bytes($bytes) as _)
+                    } else {
+                        Self::unsigned([< u $width >]::from_le_bytes($bytes) as _)
+                    }
+                }
+            };
+        }
+        match bytes {
+            Bytes::Byte(bytes) => from_bytes!(bytes, 8),
+            Bytes::HalfWord(bytes) => from_bytes!(bytes, 16),
+            Bytes::Word(bytes) => from_bytes!(bytes, 32),
+            Bytes::DoubleWord(bytes) => from_bytes!(bytes, 64),
+            Bytes::Vector(_, _) => todo!("int from vector"),
+        }
+    }
+}
+
+impl ToBytes for IntVal {
+    fn to_bytes(&self, size: Size) -> Bytes {
+        Bytes::take_from(self.u().to_le_bytes().as_slice(), size)
+            .unwrap_or_else(|| panic!("unsupported size: {:?}", size))
     }
 }
 

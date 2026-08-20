@@ -1,33 +1,48 @@
+#[cfg(debug_assertions)]
+use self::debug::Debug;
 use self::free_list::FreeList;
-use self::locks::{CommitLock, FlushLock, RenameLock};
-use super::{Prf, RegIdx};
+use self::mapping::Mapping;
+pub use self::stats::{RegStats, Stats};
+use self::substage::{Commit, Rename};
+#[cfg(debug_assertions)]
+use super::id::Id;
+use super::{Prf, RegDest, RegIdx};
 use crate::core::reg::ArchReg;
-use crate::seq::{Buf, Sequential};
-use generic_array::functional::FunctionalSequence;
-use generic_array::{ArrayLength, GenericArray};
-use std::ops::{Deref, DerefMut, Index, IndexMut};
+use crate::seq::{Pbuf, Sequential};
+use std::ops::DerefMut;
 
 mod free_list;
-pub mod locks;
+mod mapping;
+mod stats;
+pub mod substage;
+
+macro_rules! assert_ids_eq {
+    ($rat:expr, $prf:expr) => {
+        assert_eq!($rat.id, $prf.id, "mismatched PRF and RAT IDs")
+    };
+}
 
 //#region RAT
 
 #[derive(Debug)]
 pub struct Rat<T: ArchReg> {
     #[cfg(debug_assertions)]
-    id: super::id::Id,
-    mapping: Buf<Mapping<RegIdx, T>>,
+    id: Id,
+    mapping: Mapping<RegBuf, T>,
     free_list: FreeList,
-    committed: Buf<Mapping<RegIdx, T>>,
+    committed: Mapping<RegBuf, T>,
     #[cfg(debug_assertions)]
-    state: State,
+    debug: Debug,
 }
 
 impl<T: ArchReg> Rat<T> {
-    pub(super) fn new(#[cfg(debug_assertions)] id: super::id::Id, prf_size: usize) -> Self {
-        let mut mapping = GenericArray::<_, T::COUNT>::default();
-        let free_list = FreeList::new::<T>(prf_size, &mut mapping);
-        let mapping = Buf::new(mapping.into());
+    pub(super) fn new(#[cfg(debug_assertions)] id: Id, prf_size: usize) -> Self {
+        let (free_list, mapping) = FreeList::new::<T>(
+            #[cfg(debug_assertions)]
+            id,
+            prf_size,
+        );
+        let mapping = mapping.map(Pbuf::new);
         let committed = mapping.clone();
 
         Self {
@@ -37,71 +52,68 @@ impl<T: ArchReg> Rat<T> {
             free_list,
             committed,
             #[cfg(debug_assertions)]
-            state: State::empty(),
+            debug: Default::default(),
         }
     }
 
-    pub fn rename<'a>(&'a mut self, prf: &'a mut Prf<T>) -> RenameLock<'a, T> {
+    pub fn rename<'a>(&'a mut self, prf: &'a mut Prf<T>) -> Rename<'a, T> {
         #[cfg(debug_assertions)]
-        {
-            assert_eq!(
-                prf.id, self.id,
-                "mismatched PRF and RAT IDs: \
-                renaming should occur between corresponding PRF and RAT"
-            );
-            assert!(
-                !self.state.contains(State::RENAMED),
-                "cannot rename more than once per clock cycle"
-            );
-        }
-        RenameLock::new(prf, self)
+        assert_ids_eq!(self, prf);
+        #[cfg(debug_assertions)]
+        self.debug.rename();
+
+        Rename::new(self, prf)
     }
 
-    pub fn commit<'a>(&'a mut self, prf: &'a mut Prf<T>) -> CommitLock<'a, T> {
+    pub fn commit<'a>(&'a mut self, prf: &'a mut Prf<T>) -> Commit<'a, T> {
         #[cfg(debug_assertions)]
-        {
-            assert_eq!(
-                prf.id, self.id,
-                "mismatched PRF and RAT IDs: \
-                renaming should occur between corresponding PRF and RAT"
-            );
-            assert!(
-                !self.state.contains(State::COMMITTED),
-                "cannot commit more than once per clock cycle"
-            );
-        }
-        CommitLock::new(prf, self)
+        assert_ids_eq!(self, prf);
+        #[cfg(debug_assertions)]
+        self.debug.commit();
+
+        Commit::new(self, prf)
     }
 
-    pub fn flush<'a>(&'a mut self, prf: &'a mut Prf<T>) -> FlushLock<'a, T> {
+    //TODO Add a note that the iterator should be in reverse order to what was returned by `rename`
+    pub fn flush(&mut self, prf: &mut Prf<T>, flushed: impl IntoIterator<Item = RegDest<T>>) {
         #[cfg(debug_assertions)]
-        {
-            assert_eq!(
-                prf.id, self.id,
-                "mismatched PRF and RAT IDs: \
-                renaming should occur between corresponding PRF and RAT"
-            );
-            assert!(
-                !self.state.intersects(State::FLUSHED),
-                "cannot flush and rename or commit in the same clock cycle"
-            );
-        }
+        assert_ids_eq!(self, prf);
+        #[cfg(debug_assertions)]
+        self.debug.flush();
 
-        FlushLock::new(prf, self)
+        for (priority, dest) in flushed
+            .into_iter()
+            .enumerate()
+            .filter(|(_, dest)| !dest.arch.is_hardwired())
+        {
+            // Update mapping
+            self.mapping[dest.arch].write(dest.prev, Priority::Flush(priority));
+
+            // Update free list
+            self.free_list.dealloc(dest.idx);
+
+            // Update PRF
+            prf[*dest].reset();
+        }
     }
 
     pub fn flush_all(&mut self, prf: &mut Prf<T>) {
         #[cfg(debug_assertions)]
-        {
-            assert!(
-                !self.state.intersects(State::FLUSHED),
-                "cannot flush and rename or commit in the same clock cycle"
-            );
-            self.state.insert(State::FLUSHED);
-        }
-        self.mapping.write(self.committed.read_copied());
-        self.free_list
-            .reset_from_mapping(self.committed.read(), prf);
+        assert_ids_eq!(self, prf);
+        #[cfg(debug_assertions)]
+        self.debug.flush();
+
+        // Update mapping
+        self.committed
+            .iter()
+            .map(Pbuf::read_copied)
+            .enumerate()
+            .for_each(|(i, idx)| {
+                self.mapping.deref_mut()[i].write(idx, Priority::Flush(usize::MAX))
+            });
+
+        // Update free list and PRF
+        self.free_list.reset_from_committed(&self.committed, prf);
     }
 }
 
@@ -117,137 +129,110 @@ where
             free_list: self.free_list.clone(),
             committed: self.committed.clone(),
             #[cfg(debug_assertions)]
-            state: self.state,
+            debug: self.debug,
         }
     }
 }
 
 impl<T: ArchReg> Sequential for Rat<T> {
     fn finish_cycle(&mut self) {
-        self.mapping.finish_cycle();
-        self.free_list.finish_cycle();
-        self.committed.finish_cycle();
         #[cfg(debug_assertions)]
-        {
-            use bitflags::Flags;
-            self.state.clear();
-        }
+        self.debug.finish_cycle();
+
+        self.mapping.iter_mut().for_each(Sequential::finish_cycle);
+        self.committed.iter_mut().for_each(Sequential::finish_cycle);
     }
 }
 
 #[cfg(debug_assertions)]
-bitflags::bitflags! {
+mod debug {
+    use crate::seq::Sequential;
+    use bitflags::{Flags, bitflags};
+
+    macro_rules! assert_not_twice {
+        ($self:expr, $state:ident, $name:expr) => {
+            assert!(
+                !$self.0.contains(State::$state),
+                concat!(
+                    "cannot ",
+                    stringify!($name),
+                    " twice in the same clock cycle"
+                ),
+            )
+        };
+    }
+    macro_rules! assert_not_flushed {
+        ($self:expr, $action:expr) => {
+            assert!(
+                !$self.0.contains(State::FLUSHED),
+                concat!("cannot ", $action, " and flush in the same clock cycle"),
+            )
+        };
+    }
+    macro_rules! states {
+        ($(
+            $name:ident, $state:ident
+        ),*) => {
+            impl Debug {
+                $(
+                pub fn $name(&mut self) {
+                    assert_not_twice!(self, $state, stringify!($name));
+                    assert_not_flushed!(self, stringify!($name));
+                    self.0.insert(State::$state);
+                }
+                )*
+            }
+        };
+    }
+
     #[derive(Debug, Clone, Copy)]
-    struct State: u8 {
-        const RENAMED = 1 << 0;
-        const COMMITTED = 1 << 1;
-        const FLUSHED = (1 << 2) | Self::RENAMED.bits() | Self::COMMITTED.bits();
+    pub(super) struct Debug(State);
+
+    impl Default for Debug {
+        fn default() -> Self {
+            Self(State::empty())
+        }
     }
-}
 
-#[derive(derive_more::Debug, derive_more::PartialEq, derive_more::Eq, derive_more::Deref)]
-pub struct Stats<T: ArchReg>(GenericArray<RegStats<T>, T::COUNT>);
-
-#[allow(type_alias_bounds)]
-pub type RegStats<T: ArchReg> = (T, Option<T::Repr>, T::Repr);
-
-impl<T> Clone for Stats<T>
-where
-    T: ArchReg,
-    T::Repr: Clone,
-{
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
+    bitflags! {
+        #[derive(Debug, Clone, Copy)]
+        struct State: u8 {
+            const RENAMED = 1 << 0;
+            const COMMITTED = 1 << 1;
+            const FLUSHED = (1 << 2) | Self::RENAMED.bits() | Self::COMMITTED.bits();
+        }
     }
-}
 
-impl<T> Copy for Stats<T>
-where
-    T: ArchReg,
-    T::Repr: Copy,
-    <T::COUNT as ArrayLength>::ArrayType<(T, Option<T::Repr>, T::Repr)>: Copy,
-{
-}
+    states!(rename, RENAMED, commit, COMMITTED);
 
-impl<T: ArchReg> Rat<T> {
-    pub fn stats(&self, prf: &Prf<T>) -> Stats<T>
-    where
-        T: Clone,
-        T::Repr: Clone,
-    {
-        let variants = GenericArray::<_, T::COUNT>::from_slice(T::VARIANTS);
-        let values = self
-            .mapping
-            .read_copied()
-            .zip(self.committed.read().0, |s, c| {
-                let s = prf.regs[s].try_read().cloned();
-                let c = prf.regs[c]
-                    .try_read()
-                    .cloned()
-                    .expect("committed register should not be busy");
+    impl Debug {
+        pub fn flush(&mut self) {
+            assert!(
+                !self.0.intersects(State::FLUSHED),
+                "cannot flush and perform another operation in the same clock cycle",
+            );
+            self.0.insert(State::FLUSHED);
+        }
+    }
 
-                (s, c)
-            });
-
-        Stats(variants.zip(values, |reg, (s, c)| (*reg, s, c)))
+    impl Sequential for Debug {
+        fn finish_cycle(&mut self) {
+            self.0.clear()
+        }
     }
 }
 
 //#endregion
 
-//#region Mapping
+//#region RegBuf
 
-#[derive(Debug)]
-struct Mapping<T, R: ArchReg>(GenericArray<T, R::COUNT>);
+type RegBuf = Pbuf<RegIdx, Priority>;
 
-impl<T, R: ArchReg> Clone for Mapping<T, R>
-where
-    T: Clone,
-{
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
-
-impl<T, R: ArchReg> Copy for Mapping<T, R>
-where
-    T: Copy,
-    <R::COUNT as ArrayLength>::ArrayType<T>: Copy,
-{
-}
-
-impl<T, R: ArchReg> From<GenericArray<T, R::COUNT>> for Mapping<T, R> {
-    fn from(value: GenericArray<T, R::COUNT>) -> Self {
-        Self(value)
-    }
-}
-
-impl<T, R: ArchReg> Index<R> for Mapping<T, R> {
-    type Output = T;
-
-    fn index(&self, index: R) -> &Self::Output {
-        self.0.index(Into::<usize>::into(index))
-    }
-}
-
-impl<T, R: ArchReg> IndexMut<R> for Mapping<T, R> {
-    fn index_mut(&mut self, index: R) -> &mut Self::Output {
-        self.0.index_mut(Into::<usize>::into(index))
-    }
-}
-
-impl<T, R: ArchReg> Deref for Mapping<T, R> {
-    type Target = GenericArray<T, R::COUNT>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<T, R: ArchReg> DerefMut for Mapping<T, R> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum Priority {
+    Commit(usize),
+    Rename(usize),
+    Flush(usize),
 }
 
 //#endregion

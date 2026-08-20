@@ -6,12 +6,13 @@ use crate::core::{
     fe::decode::fmt::*,
     reg::int::{IntReg, IntVal, Sint},
     uop::{
-        Exception,
-        decode::{UopKind, int},
+        Exception, SpecialUopKind,
+        decode::{Kind, UopKind, int},
         int::*,
         predecode::Meta,
     },
 };
+use crate::mem::{ScalarSize, Size};
 
 //TODO Replace with the actual FpReg
 pub(in super::super) type FpReg = IntReg;
@@ -33,7 +34,8 @@ macro_rules! imm_part {
 }
 pub(in super::super) use imm_part;
 
-pub(in super::super) const RESERVED: UopKind = UopKind::Except(Exception::Illegal);
+pub(in super::super) const RESERVED: UopKind =
+    UopKind::Special(SpecialUopKind::Except(Exception::Illegal));
 
 pub(in super::super) fn c_addi4spn(fmt: CIW, _: Meta, _: Mode) -> UopKind {
     let mut imm_enc = fmt.imm5;
@@ -46,7 +48,7 @@ pub(in super::super) fn c_addi4spn(fmt: CIW, _: Meta, _: Mode) -> UopKind {
         return RESERVED;
     }
 
-    UopKind::Int(int::Uop::Alu {
+    int_uop(int::Uop::Alu {
         op: AluOp::Add,
         src1: Src::Reg(IntReg::SP),
         src2: Src::Imm(imm),
@@ -60,8 +62,8 @@ pub(in super::super) fn c_fld(fmt: CL<FpReg>, _: Meta, _: Mode) -> UopKind {
     let offset = IntVal::unsigned((imm6 | imm3) as _);
 
     todo!("c.fld decode")
-    // UopKind::Fp(fp::Uop::Ld {
-    //     size: 8,
+    // fp_uop(fp::Uop::Ld {
+    //     size: Size::Scalar(ScalarSize::DoubleWord),
     //     signed: true,
     //     base: fmt.rs1,
     //     offset,
@@ -76,8 +78,8 @@ pub(in super::super) fn c_lw(fmt: CL, _: Meta, _: Mode) -> UopKind {
     let imm3 = (fmt.imm10 & 0b111) << 3;
     let offset = IntVal::unsigned((imm6 | imm3 | imm2) as _);
 
-    UopKind::Int(int::Uop::Ld {
-        size: 4,
+    int_uop(int::Uop::Ld {
+        size: Size::Scalar(ScalarSize::Word),
         signed: true,
         base: fmt.rs1,
         offset,
@@ -93,8 +95,8 @@ fn c_flw(fmt: CL<FpReg>, _: Meta, _: Mode) -> UopKind {
     let offset = IntVal::unsigned((imm6 | imm3 | imm2) as _);
 
     todo!("c.flw decode")
-    // UopKind::Fp(fp::Uop::Ld {
-    //     size: 4,
+    // fp_uop(fp::Uop::Ld {
+    //     size: Size::Scalar(ScalarSize::Word),
     //     signed: true,
     //     base: fmt.rs1,
     //     offset,
@@ -108,8 +110,8 @@ pub(in super::super) fn c_fsd(fmt: CS<FpReg>, _: Meta, _: Mode) -> UopKind {
     let offset = IntVal::unsigned((imm6 | imm3) as _);
 
     todo!("c.fsd decode")
-    // UopKind::Fp(fp::Uop::St {
-    //     size: 8,
+    // fp_uop(fp::Uop::St {
+    //     size: Size::Scalar(ScalarSize::DoubleWord),
     //     src: fmt.rs2,
     //     base: fmt.rs1,
     //     offset,
@@ -123,8 +125,8 @@ pub(in super::super) fn c_sw(fmt: CS, _: Meta, _: Mode) -> UopKind {
     let imm3 = (fmt.imm10 & 0b111) << 3;
     let offset = IntVal::unsigned((imm6 | imm3 | imm2) as _);
 
-    UopKind::Int(int::Uop::St {
-        size: 4,
+    int_uop(int::Uop::St {
+        size: Size::Scalar(ScalarSize::Word),
         src: fmt.rs2,
         base: fmt.rs1,
         offset,
@@ -139,8 +141,8 @@ fn c_fsw(fmt: CS<FpReg>, _: Meta, _: Mode) -> UopKind {
     let offset = IntVal::unsigned((imm6 | imm3 | imm2) as _);
 
     todo!("c.fsw decode")
-    // UopKind::Fp(fp::Uop::St {
-    //     size: 4,
+    // fp_uop(fp::Uop::St {
+    //     size: Size::Scalar(ScalarSize::Word),
     //     src: fmt.rs2,
     //     base: fmt.rs1,
     //     offset,
@@ -161,7 +163,7 @@ pub(in super::super) fn c_addi(fmt: CI, _: Meta, _: Mode) -> UopKind {
     // debug_assert_ne!(fmt.rd_rs1, IntReg::ZERO, "should be c.nop"); //TODO Better NOP
     //TODO Hints if imm == 0
 
-    UopKind::Int(int::Uop::Alu {
+    int_uop(int::Uop::Alu {
         op: AluOp::Add,
         src1: Src::Reg(fmt.rd_rs1),
         src2: Src::Imm(imm),
@@ -182,7 +184,7 @@ fn c_jal(fmt: CJ, Meta { addr: pc, pred }: Meta, _: Mode) -> UopKind {
     let offset = imm11 | imm10 | imm8 | imm7 | imm6 | imm5 | imm4 | imm1;
     let target = pc.wrapping_add_signed(offset as _);
 
-    UopKind::Int(int::Uop::Jal {
+    int_uop(int::Uop::Jal {
         target,
         link: IntReg::RA,
         link_addr: pc.wrapping_add(2),
@@ -198,7 +200,7 @@ pub(in super::super) fn c_li(fmt: CI, _: Meta, _: Mode) -> UopKind {
     let imm5 = imm_part!(1, imm_enc, sign extend) << 5;
     let imm = IntVal::signed((imm5 | imm0) as _);
 
-    UopKind::Int(int::Uop::Alu {
+    int_uop(int::Uop::Alu {
         op: AluOp::Add,
         src1: Src::Reg(IntReg::ZERO),
         src2: Src::Imm(imm),
@@ -221,7 +223,7 @@ pub(in super::super) fn c_addi16sp(fmt: CI, _: Meta, _: Mode) -> UopKind {
         return RESERVED;
     }
 
-    UopKind::Int(int::Uop::Alu {
+    int_uop(int::Uop::Alu {
         op: AluOp::Add,
         src1: Src::Reg(IntReg::SP),
         src2: Src::Imm(imm),
@@ -243,7 +245,7 @@ pub(in super::super) fn c_lui(fmt: CI, _: Meta, _: Mode) -> UopKind {
     debug_assert_ne!(fmt.rd_rs1, IntReg::SP, "should be c.addi16sp");
     //TODO Hint if rd == x0
 
-    UopKind::Int(int::Uop::Alu {
+    int_uop(int::Uop::Alu {
         op: AluOp::Add,
         src1: Src::Imm(IntVal::unsigned(0)),
         src2: Src::Imm(imm),
@@ -257,7 +259,7 @@ pub(in super::super) fn c_srli(fmt: CB, _: Meta, _: Mode) -> UopKind {
     let imm = IntVal::unsigned((imm5 | imm0) as _);
     //TODO Hints if imm == 0
 
-    UopKind::Int(int::Uop::Alu {
+    int_uop(int::Uop::Alu {
         op: AluOp::Srl,
         src1: Src::Reg(fmt.rd_rs1),
         src2: Src::Imm(imm),
@@ -271,7 +273,7 @@ pub(in super::super) fn c_srai(fmt: CB, _: Meta, _: Mode) -> UopKind {
     let imm = IntVal::unsigned((imm5 | imm0) as _);
     //TODO Hints if imm == 0
 
-    UopKind::Int(int::Uop::Alu {
+    int_uop(int::Uop::Alu {
         op: AluOp::Sra,
         src1: Src::Reg(fmt.rd_rs1),
         src2: Src::Imm(imm),
@@ -286,7 +288,7 @@ pub(in super::super) fn c_andi(fmt: CB, _: Meta, _: Mode) -> UopKind {
     let imm = IntVal::signed((imm5 | imm0) as _);
     //TODO Hints if imm == 0
 
-    UopKind::Int(int::Uop::Alu {
+    int_uop(int::Uop::Alu {
         op: AluOp::Srl,
         src1: Src::Reg(fmt.rd_rs1),
         src2: Src::Imm(imm),
@@ -295,7 +297,7 @@ pub(in super::super) fn c_andi(fmt: CB, _: Meta, _: Mode) -> UopKind {
 }
 
 pub(in super::super) fn c_sub(fmt: CA, _: Meta, _: Mode) -> UopKind {
-    UopKind::Int(int::Uop::Alu {
+    int_uop(int::Uop::Alu {
         op: AluOp::Sub,
         src1: Src::Reg(fmt.rs2),
         src2: Src::Reg(fmt.rd_rs1),
@@ -304,7 +306,7 @@ pub(in super::super) fn c_sub(fmt: CA, _: Meta, _: Mode) -> UopKind {
 }
 
 pub(in super::super) fn c_xor(fmt: CA, _: Meta, _: Mode) -> UopKind {
-    UopKind::Int(int::Uop::Alu {
+    int_uop(int::Uop::Alu {
         op: AluOp::Xor,
         src1: Src::Reg(fmt.rs2),
         src2: Src::Reg(fmt.rd_rs1),
@@ -313,7 +315,7 @@ pub(in super::super) fn c_xor(fmt: CA, _: Meta, _: Mode) -> UopKind {
 }
 
 pub(in super::super) fn c_or(fmt: CA, _: Meta, _: Mode) -> UopKind {
-    UopKind::Int(int::Uop::Alu {
+    int_uop(int::Uop::Alu {
         op: AluOp::Or,
         src1: Src::Reg(fmt.rs2),
         src2: Src::Reg(fmt.rd_rs1),
@@ -322,7 +324,7 @@ pub(in super::super) fn c_or(fmt: CA, _: Meta, _: Mode) -> UopKind {
 }
 
 pub(in super::super) fn c_and(fmt: CA, _: Meta, _: Mode) -> UopKind {
-    UopKind::Int(int::Uop::Alu {
+    int_uop(int::Uop::Alu {
         op: AluOp::And,
         src1: Src::Reg(fmt.rs2),
         src2: Src::Reg(fmt.rd_rs1),
@@ -351,7 +353,7 @@ pub(in super::super) fn c_j(fmt: CJ, Meta { addr: pc, pred }: Meta, _: Mode) -> 
     let offset = imm11 | imm10 | imm8 | imm7 | imm6 | imm5 | imm4 | imm1;
     let target = pc.wrapping_add_signed(offset as _);
 
-    UopKind::Int(int::Uop::Jal {
+    int_uop(int::Uop::Jal {
         target,
         link: IntReg::ZERO,
         link_addr: pc.wrapping_add(2),
@@ -377,7 +379,7 @@ pub(in super::super) fn c_beqz(
     let offset = imm8 | imm6 | imm5 | imm3 | imm1;
     let target = pc.wrapping_add_signed(offset as _);
 
-    UopKind::Int(int::Uop::Br {
+    int_uop(int::Uop::Br {
         cmp: BrCmp::Eq,
         src1: fmt.rd_rs1,
         src2: IntReg::ZERO,
@@ -408,7 +410,7 @@ pub(in super::super) fn c_bnez(
     let offset = imm8 | imm6 | imm5 | imm3 | imm1;
     let target = pc.wrapping_add_signed(offset as _);
 
-    UopKind::Int(int::Uop::Br {
+    int_uop(int::Uop::Br {
         cmp: BrCmp::Ne,
         src1: fmt.rd_rs1,
         src2: IntReg::ZERO,
@@ -427,7 +429,7 @@ pub(in super::super) fn c_slli(fmt: CI, _: Meta, _: Mode) -> UopKind {
     let imm = IntVal::unsigned((imm5 | imm0) as _);
     //TODO Hints if imm == 0 or rd == x0
 
-    UopKind::Int(int::Uop::Alu {
+    int_uop(int::Uop::Alu {
         op: AluOp::Sll,
         src1: Src::Reg(fmt.rd_rs1),
         src2: Src::Imm(imm),
@@ -443,8 +445,8 @@ pub(in super::super) fn c_fldsp(fmt: CI<FpReg>, _: Meta, _: Mode) -> UopKind {
     let offset = IntVal::unsigned((imm6 | imm5 | imm3) as _);
 
     todo!("c.fldsp decode")
-    // UopKind::Fp(fp::Uop::Ld {
-    //     size: 8,
+    // fp_uop(fp::Uop::Ld {
+    //     size: Size::Scalar(ScalarSize::DoubleWord),
     //     base: IntReg::SP,
     //     offset,
     //     dest: fmt.rd_rs1,
@@ -462,8 +464,8 @@ pub(in super::super) fn c_lwsp(fmt: CI, _: Meta, _: Mode) -> UopKind {
     let imm5 = fmt.imm12 & 0b1;
     let offset = IntVal::unsigned((imm6 | imm5 | imm2) as _);
 
-    UopKind::Int(int::Uop::Ld {
-        size: 4,
+    int_uop(int::Uop::Ld {
+        size: Size::Scalar(ScalarSize::Word),
         signed: true,
         base: IntReg::SP,
         offset,
@@ -479,8 +481,8 @@ fn c_flwsp(fmt: CI<FpReg>, _: Meta, _: Mode) -> UopKind {
     let offset = IntVal::unsigned((imm6 | imm5 | imm2) as _);
 
     todo!("c.flwsp decode")
-    // UopKind::Fp(fp::Uop::Ld {
-    //     size: 4,
+    // fp_uop(fp::Uop::Ld {
+    //     size: Size::Scalar(ScalarSize::Word),
     //     base: IntReg::SP,
     //     offset,
     //     dest: fmt.rd_rs1,
@@ -493,7 +495,7 @@ pub(in super::super) fn c_jr(fmt: CR, Meta { addr: pc, pred }: Meta, _: Mode) ->
         return RESERVED;
     }
 
-    UopKind::Int(int::Uop::Jalr {
+    int_uop(int::Uop::Jalr {
         base: fmt.rd_rs1,
         offset: IntVal::signed(0),
         link: IntReg::ZERO,
@@ -508,7 +510,7 @@ pub(in super::super) fn c_mv(fmt: CR, _: Meta, _: Mode) -> UopKind {
 
     // We expand to `mv rd, rs2` instead of `add rd, x0, rs2` to make register
     // renaming easier, as mentioned in the Unprivileged ISA documentation.
-    UopKind::Int(int::Uop::Alu {
+    int_uop(int::Uop::Alu {
         op: AluOp::Add,
         src1: Src::Reg(fmt.rs2),
         src2: Src::Imm(IntVal::unsigned(0)),
@@ -520,14 +522,14 @@ pub(in super::super) fn c_ebreak(fmt: CR, _: Meta, _: Mode) -> UopKind {
     debug_assert_eq!(fmt.rs2, IntReg::ZERO);
     debug_assert_eq!(fmt.rd_rs1, IntReg::ZERO);
 
-    UopKind::Except(Exception::Breakpoint)
+    UopKind::Special(SpecialUopKind::Except(Exception::Breakpoint))
 }
 
 pub(in super::super) fn c_jalr(fmt: CR, Meta { addr: pc, pred }: Meta, _: Mode) -> UopKind {
     debug_assert_eq!(fmt.rs2, IntReg::ZERO);
     debug_assert_ne!(fmt.rd_rs1, IntReg::ZERO, "should be c.ebreak");
 
-    UopKind::Int(int::Uop::Jalr {
+    int_uop(int::Uop::Jalr {
         base: fmt.rd_rs1,
         offset: IntVal::signed(0),
         link: IntReg::RA,
@@ -540,7 +542,7 @@ pub(in super::super) fn c_add(fmt: CR, _: Meta, _: Mode) -> UopKind {
     debug_assert_ne!(fmt.rs2, IntReg::ZERO, "should be c.jalr or c.ebreak");
     //TODO Hints if rd == x0
 
-    UopKind::Int(int::Uop::Alu {
+    int_uop(int::Uop::Alu {
         op: AluOp::Add,
         src1: Src::Reg(fmt.rs2),
         src2: Src::Reg(fmt.rd_rs1),
@@ -555,8 +557,8 @@ pub(in super::super) fn c_fsdsp(fmt: CSS<FpReg>, _: Meta, _: Mode) -> UopKind {
     let offset = IntVal::unsigned((imm6 | imm3) as _);
 
     todo!("c.fsdsp decode")
-    // UopKind::Int(fp::Uop::St {
-    //     size: 8,
+    // fp_uop(fp::Uop::St {
+    //     size: Size::Scalar(ScalarSize::DoubleWord),
     //     src: fmt.rs2,
     //     base: IntReg::SP,
     //     offset,
@@ -569,8 +571,8 @@ pub(in super::super) fn c_swsp(fmt: CSS, _: Meta, _: Mode) -> UopKind {
     let imm2 = imm_part!(4, imm_enc) << 2;
     let offset = IntVal::unsigned((imm6 | imm2) as _);
 
-    UopKind::Int(int::Uop::St {
-        size: 4,
+    int_uop(int::Uop::St {
+        size: Size::Scalar(ScalarSize::Word),
         src: fmt.rs2,
         base: IntReg::SP,
         offset,
@@ -584,8 +586,8 @@ fn c_fswsp(fmt: CSS<FpReg>, _: Meta, _: Mode) -> UopKind {
     let offset = IntVal::unsigned((imm6 | imm2) as _);
 
     todo!("c.fswsp decode")
-    // UopKind::Int(fp::Uop::St {
-    //     size: 4,
+    // fp_uop(fp::Uop::St {
+    //     size: Size::Scalar(ScalarSize::Word),
     //     src: fmt.rs2,
     //     base: IntReg::SP,
     //     offset,
@@ -613,6 +615,10 @@ pub fn decode(bytes: i16, meta: Meta, mode: Mode, ext: Extensions) -> Option<Uop
                 None
             }
         })
+}
+
+const fn int_uop(uop: int::Uop) -> UopKind {
+    UopKind::Pipeline(Kind::Int(uop))
 }
 
 #[allow(unused_imports)]

@@ -2,7 +2,7 @@ use super::Focused;
 use crate::core::reg::{
     ArchRegCount,
     int::{IntReg, IntVal},
-    phys::rat,
+    phys::rat::{self, RegStats},
 };
 use crate::tui::components::scroll_view::{ScrollView, ScrollViewState};
 use crossterm::event::{KeyCode, KeyEvent};
@@ -71,7 +71,12 @@ impl<'a> StatefulWidget for &'a IntRegs {
             let mut names = GenericArray::<_, <IntReg as ArchRegCount>::COUNT>::uninit();
             let mut spec = GenericArray::<_, <IntReg as ArchRegCount>::COUNT>::uninit();
             let mut comm = GenericArray::<_, <IntReg as ArchRegCount>::COUNT>::uninit();
-            for (i, (r, s, c)) in regs.iter().enumerate() {
+            for (i, stats) in regs.iter().enumerate() {
+                let RegStats {
+                    arch,
+                    speculative,
+                    committed,
+                } = stats;
                 let int_val = |val: &IntVal| {
                     let mut fmt = format!("{:>width$}", val.u(), width = WIDTH);
                     if fmt.len() > WIDTH {
@@ -80,13 +85,14 @@ impl<'a> StatefulWidget for &'a IntRegs {
                     Span::raw(fmt)
                 };
 
-                names[i].write(span!("{:>width$}", r, width = WIDTH));
+                names[i].write(span!("{:>width$}", arch, width = WIDTH));
                 spec[i].write(
-                    s.as_ref()
+                    speculative
+                        .as_ref()
                         .map(|val| int_val(val).blue())
                         .unwrap_or_else(|| span!("{:>width$}", '?', width = WIDTH).red()),
                 );
-                comm[i].write(int_val(c).green());
+                comm[i].write(int_val(committed).green());
             }
 
             unsafe {

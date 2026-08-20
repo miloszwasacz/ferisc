@@ -1,19 +1,16 @@
 use super::Focused;
 use crate::core::{
-    mem::{Config, EntryStats, LdEntry, ReqStats, Src, StEntry, Stats},
+    mem::{Config, ReqStats, Src, Stats},
     uop::commit::Dest,
 };
-use crate::tui::{
-    focus::{FOCUS_COLOR, Focusable},
-    sim::AddrView,
-};
+use crate::mem::AddrView;
+use crate::tui::focus::{FOCUS_COLOR, Focusable};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Margin, Offset, Rect, Size, Spacing};
 use ratatui::macros::{horizontal, line, span};
 use ratatui::style::{Style, Stylize};
 use ratatui::symbols::merge::MergeStrategy;
-use ratatui::text::Span;
 use ratatui::widgets::{
     Block, BorderType, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
     StatefulWidget, Widget,
@@ -118,34 +115,33 @@ impl<'a> StatefulWidget for &'a MemSubsystem {
         let stq_area = block.inner(stq_block_area);
 
         let top = self.top.get();
-        let get_size = |size| match size {
-            1 => 'b',
-            2 => 'h',
-            4 => 'w',
-            8 => 'd',
-            _ => panic!("unsupported size"),
-        };
         let get_addr = |addr| match addr {
             Some(addr) => span!("{}", AddrView(addr)),
             None => span!("?").red(),
         };
-        let ld_line = |prefix: Span<'static>, ld: &EntryStats<LdEntry>| {
-            let size = get_size(ld.size);
-            let signed = if ld.signed { "" } else { "u" };
-            let dest = match ld.dest {
-                Dest::Int(dest) => span!("{}", dest.arch()),
-            };
-            let addr = get_addr(ld.addr);
-            line![prefix, span!("l{}{:1} ", size, signed), dest, ", ", addr]
-        };
-        let st_line = |prefix: Span<'static>, st: &EntryStats<StEntry>| {
-            let size = get_size(st.size);
-            let src = match st.src {
-                Src::Int(dest) => span!("{}", dest.arch()),
-            };
-            let addr = get_addr(st.addr);
-            line![prefix, span!("s{} ", size), src, ", ", addr]
-        };
+        macro_rules! ld_line {
+            ($prefix:expr, $ld:expr, $addr:expr) => {{
+                let signed = if $ld.signed { "" } else { "u" };
+                let dest = match $ld.dest {
+                    Dest::Int(dest) => span!("{}", dest.arch()),
+                };
+                line![
+                    $prefix,
+                    span!("l{}{:1} ", $ld.size, signed),
+                    dest,
+                    ", ",
+                    $addr
+                ]
+            }};
+        }
+        macro_rules! st_line {
+            ($prefix:expr, $st:expr, $addr:expr) => {{
+                let src = match $st.src {
+                    Src::Int(dest) => span!("{}", dest.arch()),
+                };
+                line![$prefix, span!("s{} ", $st.size), src, ", ", $addr]
+            }};
+        }
 
         let ldq = Paragraph::new(
             self.stats
@@ -153,7 +149,7 @@ impl<'a> StatefulWidget for &'a MemSubsystem {
                 .iter()
                 .enumerate()
                 .skip(top)
-                .map(|(i, ld)| ld_line(span!("{:2>}: ", i + 1), ld))
+                .map(|(i, ld)| ld_line!(span!("{:2>}: ", i + 1), ld, get_addr(ld.addr)))
                 .collect::<Vec<_>>(),
         );
         Clear.render(ldq_area, buf);
@@ -165,7 +161,7 @@ impl<'a> StatefulWidget for &'a MemSubsystem {
                 .iter()
                 .enumerate()
                 .skip(top)
-                .map(|(i, st)| st_line(span!("{:2>}: ", i + 1), st))
+                .map(|(i, st)| st_line!(span!("{:2>}: ", i + 1), st, get_addr(st.addr)))
                 .collect::<Vec<_>>(),
         );
         Clear.render(stq_area, buf);
@@ -175,8 +171,8 @@ impl<'a> StatefulWidget for &'a MemSubsystem {
         let prefix = span!("Current: ");
         match &self.stats.req {
             ReqStats::None => line![prefix, span!("‒")],
-            ReqStats::Ld(ld) => ld_line(prefix, ld),
-            ReqStats::St(st) => st_line(prefix, st),
+            ReqStats::Ld(ld) => ld_line!(prefix, ld, span!("{}", AddrView(ld.addr))),
+            ReqStats::St(st) => st_line!(prefix, st, span!("{}", AddrView(st.addr))),
         }
         .render(req_area, buf);
     }

@@ -17,7 +17,7 @@ pub trait Rename {
     fn rename(
         self,
         get_oper: impl Fn(Self::Reg) -> RegOper<Self::Reg>,
-        alloc_dest: impl FnMut(Self::Reg, Option<Repr<Self::Reg>>) -> Option<RegDest<Self::Reg>>,
+        alloc_dest: impl FnOnce(Self::Reg, Option<Repr<Self::Reg>>) -> Option<RegDest<Self::Reg>>,
     ) -> Option<Self::Renamed>;
 }
 

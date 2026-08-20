@@ -1,28 +1,34 @@
-use super::{Mapping, RegIdx, RenameLock};
+use super::{Mapping, RegIdx};
+#[cfg(debug_assertions)]
+use crate::core::reg::phys::id::Id;
 use crate::core::reg::{
     ArchReg,
     phys::{HARDWIRED_IDX, Prf},
 };
-use crate::seq::Sequential;
+use crate::seq::Pbuf;
 use generic_array::GenericArray;
+use generic_array::functional::FunctionalSequence;
 use static_assertions::const_assert_eq;
 use std::collections::VecDeque;
 
 //#region FreeList
 
-pub(super) type Queue = VecDeque<RegIdx>;
 const FIRST_IDX: usize = 0;
 
 #[derive(Debug, Clone)]
 pub struct FreeList {
-    queue: Queue,
     #[cfg(debug_assertions)]
-    state: super::State,
+    id: Id,
+    queue: VecDeque<RegIdx>,
 }
 
 impl FreeList {
-    pub fn new<T: ArchReg>(prf_size: usize, mapping: &mut GenericArray<RegIdx, T::COUNT>) -> Self {
-        let mut queue = (FIRST_IDX..prf_size).collect::<Queue>();
+    pub fn new<T: ArchReg>(
+        #[cfg(debug_assertions)] id: Id,
+        prf_size: usize,
+    ) -> (Self, Mapping<RegIdx, T>) {
+        let mut queue = (FIRST_IDX..prf_size).collect::<VecDeque<_>>();
+        let mut mapping = GenericArray::<_, T::COUNT>::default();
         for (i, reg) in T::VARIANTS.iter().enumerate() {
             if !reg.is_hardwired() {
                 mapping[i] = queue
@@ -40,42 +46,36 @@ impl FreeList {
             }
         }
 
-        Self {
-            queue,
+        (
+            Self {
+                #[cfg(debug_assertions)]
+                id,
+                queue,
+            },
+            mapping.into(),
+        )
+    }
+
+    pub fn try_alloc(&mut self) -> Option<AllocLock> {
+        self.queue.front().copied().map(|idx| AllocLock {
             #[cfg(debug_assertions)]
-            state: super::State::empty(),
-        }
+            id: self.id,
+            idx,
+        })
     }
 
-    pub(super) fn allocate(&mut self, count: usize) {
-        drop(self.queue.drain(..count));
-        #[cfg(debug_assertions)]
-        self.state.insert(super::State::RENAMED);
+    pub fn dealloc(&mut self, idx: RegIdx) {
+        self.queue.push_back(idx)
     }
 
-    pub(super) fn deallocate(&mut self, mut deallocated: Queue) {
-        self.queue.append(&mut deallocated);
-        #[cfg(debug_assertions)]
-        self.state.insert(super::State::COMMITTED);
-    }
-
-    pub(super) fn reset_from_mapping<T: ArchReg>(
+    pub(super) fn reset_from_committed<T: ArchReg, P>(
         &mut self,
-        mapping: &Mapping<RegIdx, T>,
+        mapping: &Mapping<Pbuf<RegIdx, P>, T>,
         prf: &mut Prf<T>,
     ) {
-        #[cfg(debug_assertions)]
-        {
-            assert!(
-                !self.state.intersects(super::State::FLUSHED),
-                "cannot flush and rename or commit in the same clock cycle"
-            );
-            self.state.insert(super::State::FLUSHED);
-        }
-
         let any_hardwired = T::VARIANTS.iter().any(|reg| reg.is_hardwired());
         let mapping = {
-            let mut sorted = *mapping;
+            let mut sorted = mapping.as_refs().map(Pbuf::read_copied);
             sorted.sort();
             sorted
         };
@@ -95,17 +95,7 @@ impl FreeList {
                     true
                 }
             })
-            .collect::<Queue>();
-    }
-}
-
-impl Sequential for FreeList {
-    fn finish_cycle(&mut self) {
-        #[cfg(debug_assertions)]
-        {
-            use bitflags::Flags;
-            self.state.clear();
-        }
+            .collect();
     }
 }
 
@@ -114,31 +104,22 @@ impl Sequential for FreeList {
 //#region Locks
 
 pub struct AllocLock {
-    allocated: usize,
-}
-
-impl<'a, T: ArchReg> RenameLock<'a, T> {
-    pub fn alloc_lock(&mut self) -> AllocLock {
-        #[cfg(debug_assertions)]
-        assert!(
-            !self.rat().free_list.state.contains(super::State::RENAMED),
-            "cannot rename more than once per clock cycle"
-        );
-        AllocLock {
-            allocated: self.alloc_count(),
-        }
-    }
+    #[cfg(debug_assertions)]
+    id: Id,
+    idx: RegIdx,
 }
 
 impl AllocLock {
-    pub fn try_alloc<'a, T: ArchReg>(&mut self, rename_lock: &RenameLock<'a, T>) -> Option<RegIdx> {
-        rename_lock
-            .rat()
-            .free_list
-            .queue
-            .get(self.allocated)
-            .copied()
-            .inspect(|_| self.allocated += 1)
+    pub fn idx(&self) -> RegIdx {
+        self.idx
+    }
+
+    pub fn commit(self, free_list: &mut FreeList) {
+        #[cfg(debug_assertions)]
+        assert_eq!(free_list.id, self.id);
+
+        let idx = free_list.queue.pop_front();
+        debug_assert!(idx.is_some_and(|idx| idx == self.idx()));
     }
 }
 

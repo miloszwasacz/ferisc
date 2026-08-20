@@ -5,20 +5,21 @@ use crate::core::{
     Mode,
     reg::int::IntVal,
     uop::{
-        Exception,
-        decode::{UopKind, int},
+        Exception, SpecialUopKind,
+        decode::{Kind, UopKind, int},
         int::*,
         predecode::Meta,
     },
 };
+use crate::mem::{ScalarSize, Size};
 
 load! {
-    pub(in super::super) lwu(4, false)
-    pub(in super::super) ld(8, true)
+    pub(in super::super) lwu(Word, false)
+    pub(in super::super) ld(DoubleWord, true)
 }
 
 store! {
-    pub(in super::super) sd(8)
+    pub(in super::super) sd(DoubleWord)
 }
 
 shift_imm! {

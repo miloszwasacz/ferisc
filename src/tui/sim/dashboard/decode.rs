@@ -1,6 +1,6 @@
 use super::{Focused, UopList};
 use crate::core::fe::decode::Stats;
-use crate::tui::sim::AddrView;
+use crate::mem::AddrView;
 use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;

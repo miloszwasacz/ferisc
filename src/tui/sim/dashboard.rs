@@ -7,7 +7,10 @@ use self::regs::IntRegs;
 use self::rob::Rob;
 use self::uop_list::UopList;
 use super::NavInfoBuilder;
-use crate::core::{Config, Stats, uop::UopKind};
+use crate::core::{
+    Config, Stats,
+    uop::{SpecialUopKind, UopKind},
+};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use num_enum::IntoPrimitive;
 use ratatui::buffer::Buffer;
@@ -246,7 +249,7 @@ impl<I> UopKind<I> {
         UopKind<I>: fmt::Display,
     {
         match self {
-            UopKind::Except(ex) => span!("{}", ex).yellow(),
+            UopKind::Special(SpecialUopKind::Except(ex)) => span!("{}", ex).yellow(),
             kind => span!("{:#}", kind),
         }
     }

@@ -57,7 +57,6 @@ pub mod focus;
 pub mod sim;
 
 pub fn run() -> color_eyre::Result<()> {
-    color_eyre::install()?;
     ratatui::run(app)?;
     Ok(())
 }

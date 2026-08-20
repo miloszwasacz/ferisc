@@ -111,6 +111,33 @@ impl<T: Default> PhysReg<T> {
         self.buf.read_copied()
     }
 
+    /// Tries to read the register, returning a reference to the data currently
+    /// stored if the register is not ["busy"](Self::mark_busy), bypassing any
+    /// data [written](Self::write) in this clock cycle.
+    ///
+    /// # Imperativeness
+    ///
+    /// See [`Buf::read_bypassed`] for clarification on the order in which this
+    /// method can be called in relation to other methods.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use ferisc::core::reg::phys::PhysReg;
+    /// # use ferisc::seq::Sequential;
+    /// let mut reg = PhysReg::<i32>::new();
+    /// reg.write(2);
+    ///
+    /// // Regular read yields the old data
+    /// assert_eq!(reg.try_read().copied(), Some(i32::default()));
+    ///
+    /// // Bypassing yields the new data
+    /// assert_eq!(reg.try_read_bypassed().copied(), Some(2));
+    /// ```
+    pub fn try_read_bypassed(&self) -> Option<&T> {
+        self.buf.read_bypassed().as_ref()
+    }
+
     /// Schedules a new value to be written into the register at the end
     /// of the current clock cycle, if it is not hardwired.
     ///
@@ -200,6 +227,40 @@ impl<T: Default> PhysReg<T> {
     pub fn mark_busy(&mut self) {
         if !self.hardwired {
             self.buf.write(None);
+        }
+    }
+
+    /// Schedules the register to be reset to have the default value.
+    ///
+    /// This operation is primarily used when flushing, to mark the register as
+    /// not [busy](Self::mark_busy).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use ferisc::core::reg::phys::PhysReg;
+    /// # use ferisc::seq::Sequential;
+    /// let mut reg = PhysReg::<i32>::new();
+    /// reg.write(4);
+    /// reg.finish_cycle();
+    /// assert_eq!(reg.try_read().copied(), Some(4));
+    ///
+    /// // Resetting the register makes it yield the default value
+    /// reg.reset();
+    /// reg.finish_cycle();
+    /// assert_eq!(reg.try_read().copied(), Some(i32::default()));
+    ///
+    /// // Resetting a busy register marks it as not busy
+    /// reg.mark_busy();
+    /// reg.finish_cycle();
+    /// assert_eq!(reg.try_read(), None);
+    /// reg.reset();
+    /// reg.finish_cycle();
+    /// assert_eq!(reg.try_read().copied(), Some(i32::default()));
+    /// ```
+    pub fn reset(&mut self) {
+        if !self.hardwired {
+            self.buf.write(Some(T::default()));
         }
     }
 }

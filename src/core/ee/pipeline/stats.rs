@@ -1,3 +1,4 @@
+pub use super::pipelines::AllStats;
 use super::*;
 use crate::core::{
     ee::{eu, rs},
@@ -9,7 +10,7 @@ pub struct Stats<T>
 where
     T: ArchReg,
     DUop: InferUop<T>,
-    IUop<T>: Issue,
+    IUop<T>: rs::Uop<Reg = T>,
 {
     pub rat: RatStats<T>,
     pub prf: PrfStats<T>,
@@ -23,7 +24,7 @@ where
     T: ArchReg,
     T::Repr: Clone,
     DUop: InferUop<T>,
-    IUop<T>: Issue + Clone,
+    IUop<T>: rs::Uop<Reg = T> + Clone,
     EUop<T>: Clone,
 {
     fn clone(&self) -> Self {
@@ -39,7 +40,7 @@ impl<T> Stats<T>
 where
     T: ArchReg,
     DUop: InferUop<T>,
-    IUop<T>: Issue,
+    IUop<T>: rs::Uop<Reg = T>,
 {
     pub fn lines(&self) -> &[LineStats<T>] {
         &self.lines
@@ -48,11 +49,10 @@ where
 
 impl<T> Pipeline<T>
 where
-    T: ArchReg,
-    T::Repr: Clone,
+    T: ArchReg<Repr: Clone>,
     DUop: InferUop<T>,
-    IUop<T>: Issue + Clone,
-    EUop<T>: Clone,
+    IUop<T>: rs::Uop<Reg = T> + Clone,
+    EUop<T>: eu::Uop<Reg = T> + Clone,
 {
     pub fn stats(&self) -> Stats<T> {
         Stats {
@@ -64,17 +64,5 @@ where
                 .map(|(rs, eu)| (rs.stats(), eu.stats()))
                 .collect(),
         }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct AllStats {
-    pub int: Stats<IntReg>,
-}
-
-impl Pipelines {
-    pub fn stats(&self) -> AllStats {
-        let Self { int } = self;
-        AllStats { int: int.stats() }
     }
 }

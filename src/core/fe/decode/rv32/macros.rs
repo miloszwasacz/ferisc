@@ -6,7 +6,7 @@ macro_rules! int_inst {
         $(
         $( #[$attr] )*
         $vis fn $name($fmt: $fmt_ty, $meta: Meta, $mode: Mode) -> UopKind {
-            UopKind::Int(int::Uop::$uop { $( $fields )* })
+            UopKind::Pipeline(Kind::Int(int::Uop::$uop { $( $fields )* }))
         }
         )*
     };
@@ -35,11 +35,11 @@ macro_rules! branch {
 pub(in crate::core::fe::decode) use branch;
 
 macro_rules! load {
-    ($( $vis:vis $name:ident($size:literal, $signed:literal) )*) => {
+    ($( $vis:vis $name:ident($size:ident, $signed:literal) )*) => {
         int_inst! {
             $(
             $vis $name(fmt: I, _, _): Ld {
-                size: $size,
+                size: Size::Scalar(ScalarSize::$size),
                 signed: $signed,
                 base: fmt.rs1,
                 offset: fmt.imm,
@@ -52,11 +52,11 @@ macro_rules! load {
 pub(in crate::core::fe::decode) use load;
 
 macro_rules! store {
-    ($( $vis:vis $name:ident($size:literal) )*) => {
+    ($( $vis:vis $name:ident($size:ident) )*) => {
         int_inst! {
             $(
             $vis $name(fmt: S, _, _): St {
-                size: $size,
+                size: Size::Scalar(ScalarSize::$size),
                 src: fmt.rs2,
                 base: fmt.rs1,
                 offset: fmt.imm,

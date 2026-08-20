@@ -1,108 +1,119 @@
-pub use self::bypass::{Bypass, BypassBuilder};
-use self::locks::{DispatchLock, IssueLock};
-use crate::core::uop::issue::{Issue, TryReadReg, Uop as IUop};
-use crate::seq::{Buf, Clearable, Sequential};
+use self::substage::{Dispatch, Issue};
+pub use self::uop::Uop;
+use crate::core::{ee::rob, uop::issue::TryReadReg};
+use crate::seq::{Clearable, Sequential};
+use derive_where::derive_where;
 use std::collections::VecDeque;
+use std::debug_assert_matches;
 use std::num::NonZeroUsize;
+use std::ops::Deref;
 
-mod bypass;
-pub mod locks;
+pub mod substage;
+mod uop;
 
 #[derive(Debug, Clone)]
 pub struct Rs<U> {
-    entries: VecDeque<IUop<U>>,
-    len: Buf<usize>,
+    entries: VecDeque<RsEntry<U>>,
     size: NonZeroUsize,
-    #[cfg(debug_assertions)]
-    state: State,
+    state: State<U>,
 }
 
-impl<U> Rs<U> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, derive_more::Deref, derive_more::DerefMut)]
+pub struct RsEntry<U> {
+    #[deref]
+    #[deref_mut]
+    pub uop: U,
+    pub flushed: bool,
+}
+
+#[derive(Debug, Clone)]
+#[derive_where(Default)]
+struct State<U> {
+    pushed: VecDeque<RsEntry<U>>,
+    removed: Option<usize>,
+    flushed: Flush,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+enum Flush {
+    #[default]
+    None,
+    Some,
+    All,
+}
+
+impl<U: Uop> Rs<U> {
     pub fn new(config: &Config) -> Self {
         Self {
             entries: VecDeque::with_capacity(config.size.get()),
-            len: Buf::new(0),
             size: config.size,
-            #[cfg(debug_assertions)]
-            state: State::empty(),
+            state: Default::default(),
         }
     }
 
-    pub fn dispatch(&mut self) -> DispatchLock<'_, U> {
-        #[cfg(debug_assertions)]
-        assert!(
-            !self.state.contains(State::DISPATCHED),
-            "cannot dispatch more than once per clock cycle"
-        );
-
-        DispatchLock::new(self)
+    pub fn dispatch(&mut self) -> Dispatch<'_, U> {
+        Dispatch::new(self)
     }
 
-    pub fn issue<'a, R>(&'a mut self, try_read_reg: R) -> IssueLock<'a, U, R>
-    where
-        U: Issue + Clone + 'a,
-        R: TryReadReg<U::Reg>,
-    {
-        #[cfg(debug_assertions)]
-        assert!(
-            !self.state.contains(State::ISSUED),
-            "cannot issue more than once per clock cycle"
-        );
-
-        IssueLock::new(self, try_read_reg)
+    pub fn issue<R: TryReadReg<U::Reg>>(&mut self, read: R) -> Issue<'_, U, R> {
+        Issue::new(self, read)
     }
 
     //TODO Document how `flush` is different from `clear` (i.e. flush vs flush all)
-    pub fn flush(&mut self) {
-        #[cfg(debug_assertions)]
-        {
-            assert!(
-                !self.state.intersects(State::CLEARED),
-                "cannot flush and dispatch or issue in the same clock cycle"
-            );
-            self.state.insert(State::CLEARED);
+    pub fn flush(&mut self, flush: &rob::lock::Flush<'_>) {
+        let prev = std::mem::replace(&mut self.state.flushed, Flush::Some);
+        debug_assert_matches!(
+            prev,
+            Flush::None,
+            "cannot flush more than once per clock cycle"
+        );
+        for entry in &mut self.entries {
+            entry.flushed = entry.flushed || entry.is_flushed(flush);
         }
-
-        self.entries.retain(|uop| !uop.rob_entry.is_flushed());
     }
 }
 
-impl<U> Sequential for Rs<U> {
+impl<U: Uop> Sequential for Rs<U> {
+    /// Marks the end of the clock cycle, finalizing any outstanding operations.
+    ///
+    /// <div class="warning">
+    ///
+    /// This method updates the state of _ONLY_ the reservation station, not
+    /// the contained elements.
+    ///
+    /// </div>
     fn finish_cycle(&mut self) {
-        debug_assert!(self.entries.len() <= self.size.get());
-        self.len.write(self.entries.len());
-        self.len.finish_cycle();
+        // Remove
+        if let Some(removed) = self.state.removed.take() {
+            self.entries.remove(removed);
+        }
 
-        #[cfg(debug_assertions)]
+        // Push
         {
-            use bitflags::Flags;
-            self.state.clear();
+            self.entries.append(&mut self.state.pushed);
+        }
+
+        // Flush
+        match std::mem::take(&mut self.state.flushed) {
+            Flush::None => {}
+            Flush::Some => self.entries.retain(|entry| !entry.flushed),
+            Flush::All => self.entries.clear(),
         }
     }
 }
 
-impl<U> Clearable for Rs<U> {
+impl<U: Uop> Clearable for Rs<U> {
     fn clear(&mut self) {
-        #[cfg(debug_assertions)]
-        {
-            assert!(
-                !self.state.intersects(State::CLEARED),
-                "cannot flush and dispatch or issue in the same clock cycle"
-            );
-            self.state.insert(State::CLEARED);
-        }
-
-        self.entries.clear();
+        self.state.flushed = Flush::All;
     }
 }
 
-#[cfg(debug_assertions)]
-bitflags::bitflags! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    struct State: u8 {
-        const DISPATCHED = 1 << 0;
-        const ISSUED = 1 << 1;
-        const CLEARED = 1 << 2 | Self::DISPATCHED.bits() | Self::ISSUED.bits();
+impl<U> From<U> for RsEntry<U> {
+    fn from(value: U) -> Self {
+        RsEntry {
+            uop: value,
+            flushed: false,
+        }
     }
 }
 
@@ -112,22 +123,16 @@ pub struct Config {
 }
 
 #[derive(Debug, Clone)]
-pub struct Stats<U>(VecDeque<IUop<U>>);
+pub struct Stats<U>(VecDeque<RsEntry<U>>);
 
 impl<U> Stats<U> {
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = &IUop<U>> + DoubleEndedIterator {
-        self.0.iter()
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &U> + ExactSizeIterator {
+        self.0.iter().map(Deref::deref)
     }
 }
 
 impl<U: Clone> Rs<U> {
     pub fn stats(&self) -> Stats<U> {
-        #[cfg(debug_assertions)]
-        assert!(
-            self.state.is_empty(),
-            "cannot create statistics in the middle of a clock cycle"
-        );
-
         Stats(self.entries.clone())
     }
 }

@@ -10,30 +10,17 @@ impl Issue for DUop {
     type Reg = IntReg;
     type Issued = Uop;
 
-    fn issue(self, try_read_reg: impl TryReadReg<Self::Reg>) -> Option<Self::Issued> {
-        macro_rules! read_copied {
-            ($reg:expr) => {
-                try_read_reg.try_read($reg)?
-            };
-        }
-        macro_rules! unwrap_src {
-            ($src:expr) => {{
-                match $src {
-                    Src::Reg(reg) => read_copied!(reg),
-                    Src::Imm(imm) => imm,
-                }
-            }};
-        }
+    fn issue(self, read: impl TryReadReg<Self::Reg>) -> Option<Self::Issued> {
         Some(match self {
             DUop::Alu {
                 op,
                 src1,
                 src2,
                 dest,
-            } => Self::Issued::Alu {
+            } => Uop::Alu {
                 op,
-                src1: unwrap_src!(src1),
-                src2: unwrap_src!(src2),
+                src1: unwrap_src!(read, src1),
+                src2: unwrap_src!(read, src2),
                 dest,
             },
             DUop::Mul {
@@ -41,14 +28,14 @@ impl Issue for DUop {
                 src1,
                 src2,
                 dest,
-            } => Self::Issued::Mul {
+            } => Uop::Mul {
                 op,
-                src1: read_copied!(src1),
-                src2: read_copied!(src2),
+                src1: try_read!(read, src1),
+                src2: try_read!(read, src2),
                 dest,
             },
-            DUop::Jalr { base, offset, pred } => Self::Issued::Jalr {
-                base: read_copied!(base),
+            DUop::Jalr { base, offset, pred } => Uop::Jalr {
+                base: try_read!(read, base),
                 offset,
                 pred,
             },
@@ -59,28 +46,28 @@ impl Issue for DUop {
                 next,
                 target,
                 pred,
-            } => Self::Issued::Br {
+            } => Uop::Br {
                 cmp,
-                src1: read_copied!(src1),
-                src2: read_copied!(src2),
+                src1: try_read!(read, src1),
+                src2: try_read!(read, src2),
                 next,
                 target,
                 pred,
             },
-            DUop::Lda { base, offset, dest } => Self::Issued::Lda {
-                base: read_copied!(base),
+            DUop::Lda { base, offset, dest } => Uop::Lda {
+                base: try_read!(read, base),
                 offset,
                 dest,
             },
-            DUop::Sta { base, offset, dest } => Self::Issued::Sta {
-                base: read_copied!(base),
+            DUop::Sta { base, offset, dest } => Uop::Sta {
+                base: try_read!(read, base),
                 offset,
                 dest,
             },
-            DUop::Csr { op, csr, src, dest } => Self::Issued::Csr {
+            DUop::Csr { op, csr, src, dest } => Uop::Csr {
                 op,
                 csr,
-                src: unwrap_src!(src),
+                src: unwrap_src!(read, src),
                 dest,
             },
         })

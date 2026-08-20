@@ -1,33 +1,32 @@
-pub use self::config::{Config, Configs};
+pub use self::pipelines::{Commit, Configs, Dispatch, Kind, Pipelines, Rename};
 pub use self::stats::{AllStats, LineStats, Stats};
 use crate::core::{
     csr::CsrFile,
     ee::{
-        eu::Eu,
-        rob::locks::{AccessLock as RobLock, ExecuteLock},
+        eu::{self, Eu},
+        rob,
         rs::{self, Rs},
     },
-    fe::addr_gen,
-    mem::AddrBypassBuilder,
     reg::{
         ArchReg,
         int::IntReg,
-        phys::{Prf, Rat, RegOper},
+        phys::{Prf, RegDest, rat::Rat},
     },
     uop::{
-        Infer, InferUop, decode::Uop as DecUop, dispatch::Uop as DUop, execute::Execute,
-        issue::Issue, rename::Uop as RUop,
+        Infer, InferUop, dispatch,
+        issue::{self, Issue},
     },
 };
-use crate::seq::{Clearable, IntoPipelineStage, Sequential};
-use std::cell::RefCell;
+use crate::seq::{Clearable, Sequential};
+use std::num::NonZeroUsize;
 
-mod config;
-pub mod locks;
+mod pipelines;
 mod stats;
+pub mod substage;
 
-type IUop<T> = Infer<DUop, T>;
-type EUop<T> = <IUop<T> as Issue>::Issued;
+type DUop = dispatch::Uop;
+type IUop<T> = issue::Uop<Infer<DUop, T>>;
+type EUop<T> = <IUop<T> as rs::Uop>::Issued;
 type Line<T> = (Rs<IUop<T>>, Eu<EUop<T>>);
 
 #[derive(derive_more::Debug)]
@@ -35,7 +34,8 @@ pub struct Pipeline<T>
 where
     T: ArchReg,
     DUop: InferUop<T>,
-    IUop<T>: Issue,
+    IUop<T>: rs::Uop<Reg = T>,
+    EUop<T>: eu::Uop<Reg = T>,
 {
     rat: Rat<T>,
     prf: Prf<T>,
@@ -46,7 +46,8 @@ impl<T> Pipeline<T>
 where
     T: ArchReg,
     DUop: InferUop<T>,
-    IUop<T>: Issue<Reg = T> + Clone,
+    IUop<T>: rs::Uop<Reg = T>,
+    EUop<T>: eu::Uop<Reg = T>,
 {
     pub fn new(config: &Config) -> Self {
         let (prf, rat) = Prf::new(config.prf_size.get());
@@ -59,41 +60,25 @@ where
         Self { rat, prf, lines }
     }
 
-    pub fn tick<'a>(
-        &'a mut self,
-        rob_lock: &mut ExecuteLock<'_, '_, '_>,
-        addr_bypass: &mut AddrBypassBuilder,
-        csrf: &mut CsrFile,
-    ) -> Bypass<'a, T>
-    where
-        T::Repr: Clone,
-        <IUop<T> as Issue>::Issued: Execute<Reg = T>,
-    {
-        let mut bypass = rs::Bypass::empty();
-        for (_, eu) in &mut self.lines {
-            bypass.append(eu.tick(rob_lock, addr_bypass, &mut self.prf, csrf));
-        }
+    pub fn flush(
+        &mut self,
+        flush: &rob::lock::Flush<'_>,
+        flushed: impl IntoIterator<Item = RegDest<T>>,
+    ) {
+        self.rat.flush(&mut self.prf, flushed);
         for (rs, eu) in &mut self.lines {
-            let prf = RefCell::new(&mut self.prf);
-            rs.issue(|reg| bypass.try_read(&**prf.borrow(), reg).cloned())
-                .into_pipeline_stage()
-                .substage(eu.issue(
-                    rob_lock,
-                    |reg, val| prf.borrow_mut()[reg].write(val),
-                    addr_bypass,
-                    csrf,
-                ))
-                .execute();
+            rs.flush(flush);
+            eu.flush(flush);
         }
-        Bypass(bypass, &mut self.prf)
     }
 }
 
 impl<T> Sequential for Pipeline<T>
 where
     T: ArchReg,
-    DUop: InferUop<T>,
-    IUop<T>: Issue,
+    DUop: InferUop<T, Kind: Issue<Reg = T>>,
+    IUop<T>: rs::Uop<Reg = T>,
+    EUop<T>: eu::Uop<Reg = T>,
 {
     fn finish_cycle(&mut self) {
         self.rat.finish_cycle();
@@ -108,8 +93,9 @@ where
 impl<T> Clearable for Pipeline<T>
 where
     T: ArchReg,
-    DUop: InferUop<T>,
-    IUop<T>: Issue,
+    DUop: InferUop<T, Kind: Issue<Reg = T>>,
+    IUop<T>: rs::Uop<Reg = T>,
+    EUop<T>: eu::Uop<Reg = T>,
 {
     fn clear(&mut self) {
         self.rat.flush_all(&mut self.prf);
@@ -120,75 +106,8 @@ where
     }
 }
 
-#[derive(Debug)]
-pub struct Pipelines {
-    int: Pipeline<IntReg>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Config {
+    pub prf_size: NonZeroUsize,
+    pub lines: Box<[(rs::Config, eu::Config)]>,
 }
-
-impl Pipelines {
-    pub fn new(configs: &Configs) -> Self {
-        let Configs { int } = configs;
-
-        Self {
-            int: Pipeline::new(int),
-        }
-    }
-
-    pub fn tick<'a>(
-        &'a mut self,
-        rob: &mut RobLock<'_>,
-        addr_bypass: &mut AddrBypassBuilder,
-        csrf: &mut CsrFile,
-        addr_gen: addr_gen::Lock<'_>,
-    ) -> BypassNetwork<'a> {
-        let Self { int } = self;
-        let mut rob_lock = rob.execute(addr_gen);
-
-        BypassNetwork {
-            int: int.tick(&mut rob_lock, addr_bypass, csrf),
-        }
-    }
-}
-
-impl Sequential for Pipelines {
-    fn finish_cycle(&mut self) {
-        let Self { int } = self;
-
-        int.finish_cycle();
-    }
-}
-
-impl Clearable for Pipelines {
-    fn clear(&mut self) {
-        let Self { int } = self;
-
-        int.clear();
-    }
-}
-
-//#region Bypass
-
-pub struct Bypass<'a, T: ArchReg>(rs::Bypass<T>, &'a mut Prf<T>);
-
-impl<'a, T: ArchReg> Bypass<'a, T> {
-    pub fn try_read(&self, reg: RegOper<T>) -> Option<&T::Repr> {
-        self.0.try_read(self.1, reg)
-    }
-
-    pub fn try_read_copied(&self, reg: RegOper<T>) -> Option<T::Repr>
-    where
-        T::Repr: Copy,
-    {
-        self.0.try_read_copied(self.1, reg)
-    }
-
-    pub fn write(&mut self, reg: RegOper<T>, val: T::Repr) {
-        self.1[reg].write(val);
-    }
-}
-
-pub struct BypassNetwork<'a> {
-    pub int: Bypass<'a, IntReg>,
-}
-
-//#endregion

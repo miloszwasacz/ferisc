@@ -1,12 +1,11 @@
-use super::{Execute, Latency, WriteReg};
+use super::*;
 use crate::core::{
-    csr::CsrFile,
-    ee::rob::{EntryHandle, locks::ExecuteLock},
-    mem::AddrBypassBuilder,
     reg::int::{IntReg, IntVal, Sint, Uint},
-    uop::{int::*, issue::int::Uop},
+    uop::{int::*, issue},
 };
 use static_assertions::const_assert_eq;
+
+pub type Uop = issue::int::Uop;
 
 impl Execute for Uop {
     type Reg = IntReg;
@@ -36,10 +35,9 @@ impl Execute for Uop {
 
     fn execute(
         self,
-        mut rob_entry: EntryHandle,
-        lock: &mut ExecuteLock<'_, '_, '_>,
-        write_reg: &mut impl WriteReg<Self::Reg>,
-        addr_bypass: &mut AddrBypassBuilder,
+        handle: rob::Handle,
+        jump: impl Jump,
+        mut write: impl WriteReg<Self::Reg>,
         csrf: &mut CsrFile,
     ) {
         type Sword = i32;
@@ -61,7 +59,7 @@ impl Execute for Uop {
                 const SHIFT_MASK: u64 = 0b111111;
                 const WORD_SHIFT_MASK: u32 = 0b11111;
 
-                write_reg.write(
+                write.write(
                     *dest,
                     match op {
                         AluOp::Add => IntVal::signed(src1.s().wrapping_add(src2.s())),
@@ -119,7 +117,7 @@ impl Execute for Uop {
             } => {
                 const MULH_SHIFT: u32 = Uint::BITS;
 
-                write_reg.write(
+                write.write(
                     *dest,
                     match op {
                         MulOp::Mul => IntVal::signed(src1.s().wrapping_mul(src2.s())),
@@ -194,7 +192,7 @@ impl Execute for Uop {
             Uop::Jalr { base, offset, pred } => {
                 let target = base.addr().wrapping_add_signed(offset.s());
                 if pred.is_none_or(|addr| addr != target) {
-                    lock.jump(target, &rob_entry);
+                    jump.jump(target, &handle);
                     //TODO Notify BTB
                     //TODO Notify BP?
                 }
@@ -217,24 +215,25 @@ impl Execute for Uop {
                 };
                 if out != pred {
                     let next = if out { target } else { next };
-                    lock.jump(next, &rob_entry);
+                    jump.jump(next, &handle);
                     //TODO Notify BP
                     //TODO Notify BTB if taken
                 }
             }
             Uop::Lda { base, offset, dest } | Uop::Sta { base, offset, dest } => {
-                addr_bypass.write_addr(dest, base.addr().wrapping_add_signed(offset.s()));
+                dest.write(base.addr().wrapping_add_signed(offset.s()));
+                return;
             }
             Uop::Csr { op, csr, src, dest } => match csrf.access(csr, op, src) {
                 Ok(out) => {
-                    write_reg.write(*dest, out);
+                    write.write(*dest, out);
                 }
                 Err(ex) => {
-                    rob_entry.throw(ex);
+                    handle.throw(ex);
                     return;
                 }
             },
         }
-        rob_entry.mark_done();
+        handle.mark_done();
     }
 }

@@ -1,4 +1,5 @@
 use convert_case::{Boundary, Case, Casing, separator};
+use itertools::Itertools;
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use std::{
@@ -81,7 +82,7 @@ fn gen_decode_fn(insts: Vec<Inst>) -> TokenStream {
                         return Some(
                             <#fmt>::decode(bytes)
                                 .map(|fmt| #func(fmt, meta, mode))
-                                .unwrap_or(UopKind::Except(Exception::Illegal))
+                                .unwrap_or(UopKind::Special(SpecialUopKind::Except(Exception::Illegal)))
                         );
                     }
                 }
@@ -156,8 +157,11 @@ fn parse_enc_file<P: AsRef<Path>>(path: P) -> (P, Result<Vec<Inst>, TokenStream>
             defs.insert((inst.mask, inst.pat.clone()), inst);
         }
     }
-    let mut defs = defs.into_values().collect::<Vec<_>>();
-    defs.sort_unstable_by_key(|inst| std::cmp::Reverse(inst.mask));
+    let defs = defs
+        .into_values()
+        .sorted_unstable_by_key(|inst| std::cmp::Reverse(inst.mask))
+        .collect::<Vec<_>>();
+
     (path, Ok(defs))
 }
 

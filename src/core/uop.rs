@@ -1,5 +1,5 @@
 use self::fence::Fence;
-use crate::core::reg::ArchReg;
+use crate::core::{ee::pipeline, reg::ArchReg};
 use strum::{Display, FromRepr};
 
 const INST_NAME_WIDTH: usize = 8;
@@ -17,8 +17,13 @@ pub mod predecode;
 pub mod rename;
 
 #[derive(Debug, derive_more::Display, Clone, Copy, PartialEq, Eq)]
-pub enum UopKind<I> {
-    Int(I),
+pub enum UopKind<I, S = SpecialUopKind> {
+    Pipeline(pipeline::Kind<I>),
+    Special(S),
+}
+
+#[derive(Debug, derive_more::Display, Clone, Copy, PartialEq, Eq)]
+pub enum SpecialUopKind {
     MemOrd(Fence),
     Except(Exception),
 }
@@ -27,10 +32,10 @@ pub trait InferUop<T: ArchReg> {
     type Kind;
 }
 
-#[allow(type_alias_bounds)]
-pub type Infer<U: InferUop<T>, T> = <U as InferUop<T>>::Kind;
+pub type Infer<U, T> = <U as InferUop<T>>::Kind;
 
 #[derive(Debug, Display, Clone, Copy, PartialEq, Eq, FromRepr)]
+#[strum(serialize_all = "snake_case")]
 #[repr(u64)]
 pub enum Exception {
     /// Instruction address misaligned
@@ -50,14 +55,14 @@ pub enum Exception {
     /// Store/AMO access fault
     StAccessFault = 7,
     /// Environment call from U-Mode
-    #[strum(to_string = "ECALL (from U-mode)")]
+    #[strum(to_string = "ecall (from U-mode)")]
     EcallU = 8,
     /// Environment call from S-Mode
-    #[strum(to_string = "ECALL (from S-mode)")]
+    #[strum(to_string = "ecall (from S-mode)")]
     EcallS = 9,
     // Reserved = 10,
     /// Environment call from M-Mode
-    #[strum(to_string = "ECALL (from M-mode)")]
+    #[strum(to_string = "ecall (from M-mode)")]
     EcallM = 11,
     /// Instruction page fault
     InstrPageFault = 12,

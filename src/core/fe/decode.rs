@@ -1,32 +1,29 @@
-use self::lock::DecodeLock;
+use self::substage::{In, Out};
 use crate::core::{
     Mode,
     csr::{CsrFile, m::misa::Mxl},
     fe::addr_gen,
     uop::{
-        Exception, UopKind,
-        decode::Uop,
+        Exception, SpecialUopKind,
+        decode::{Uop, UopKind},
         predecode::{PdcdBytes, Predecoded},
     },
 };
-use crate::seq::{
-    Clearable, Queue, Sequential,
-    locks::{LockCompose, StageLock},
-};
-use std::num::{NonZeroU8, NonZeroUsize};
+use crate::seq::{Clearable, Queue, Sequential};
+use std::num::NonZeroUsize;
 
 pub mod rv32;
 pub mod rv64;
 
 pub mod fmt;
-mod lock;
+pub mod substage;
 
 #[derive(Debug)]
 pub struct DecodeUnit<D = DefaultDecoder> {
     decoders: Box<[D]>,
     out_queue: Queue<Uop>,
     //TODO Different IN and OUT widths
-    width: NonZeroU8,
+    width: NonZeroUsize,
     flushed: bool,
 }
 
@@ -37,34 +34,30 @@ impl<D: Decoder> DecodeUnit<D> {
 
         Self {
             decoders: dec.into_boxed_slice(),
-            out_queue: Queue::new(config.queue_size.unwrap_or(config.width.into()).get()),
+            out_queue: Queue::new(config.queue_size.unwrap_or(config.width.into())),
             width: config.width,
             flushed: false,
         }
     }
 
-    pub fn decode<'a, 'g>(
+    pub fn r#in<'a, 'g>(
         &'a mut self,
-        csrf: &'a CsrFile,
         addr_gen: addr_gen::Lock<'g>,
+        csrf: &'a CsrFile,
         mode: Mode,
-    ) -> impl StageLock<'a, &'a Predecoded, ()> {
-        LockCompose::new(
-            DecodeLock::new(&mut self.decoders, csrf, addr_gen, mode),
-            self.out_queue.push(),
-        )
+    ) -> In<'a, 'g, D> {
+        In::new(self, addr_gen, csrf, mode)
     }
 
-    pub fn lock(&mut self) -> impl StageLock<'_, (), &Uop> {
-        self.out_queue.pop(self.width.get() as _)
+    pub fn out(&mut self) -> Out<'_> {
+        Out::new(self)
     }
 }
 
 impl<D> Sequential for DecodeUnit<D> {
     fn finish_cycle(&mut self) {
         self.out_queue.finish_cycle();
-        if self.flushed {
-            self.flushed = false;
+        if std::mem::take(&mut self.flushed) {
             self.out_queue.clear();
             self.out_queue.finish_cycle();
         }
@@ -95,7 +88,7 @@ impl Decoder for DefaultDecoder {
                         if $ext.c() {
                             $module::c::decode(bytes, $meta, $mode, $ext)
                         } else {
-                            Some(UopKind::Except(Exception::Illegal))
+                            Some(exception(Exception::Illegal))
                         }
                     }
                 }
@@ -107,7 +100,7 @@ impl Decoder for DefaultDecoder {
             Ok(bytes) => bytes,
             Err(ex) => {
                 return Uop {
-                    kind: UopKind::Except(ex),
+                    kind: exception(ex),
                     addr,
                     comp: false,
                 };
@@ -124,15 +117,19 @@ impl Decoder for DefaultDecoder {
             Mxl::RV32 => decode!(rv32, bytes, meta, mode, misa.ext),
             Mxl::RV64 => decode!(rv64, bytes, meta, mode, misa.ext),
         }
-        .unwrap_or(UopKind::Except(Exception::Illegal));
+        .unwrap_or(exception(Exception::Illegal));
 
         Uop { kind, addr, comp }
     }
 }
 
+const fn exception(ex: Exception) -> UopKind {
+    UopKind::Special(SpecialUopKind::Except(ex))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Config {
-    pub width: NonZeroU8,
+    pub width: NonZeroUsize,
     pub queue_size: Option<NonZeroUsize>,
 }
 
