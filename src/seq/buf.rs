@@ -275,3 +275,125 @@ impl<T: Default> Clearable for Buf<T> {
         self.state = BufState::Cleared(T::default);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_impl() {
+        let buf = Buf::<u32>::default();
+        assert_eq!(*buf.read(), 0);
+    }
+
+    #[test]
+    fn read_bypassed_with_no_writes_returns_current_value() {
+        let buf = Buf::new(42);
+        assert_eq!(*buf.read_bypassed(), 42);
+    }
+
+    #[test]
+    fn finish_cycle_with_no_writes_preserves_value() {
+        let mut buf = Buf::new(42);
+        buf.finish_cycle();
+        assert_eq!(*buf.read(), 42);
+    }
+
+    #[test]
+    fn multiple_cycles() {
+        let mut buf = Buf::new(0);
+
+        // Cycle 1
+        buf.write(10);
+        buf.finish_cycle();
+        assert_eq!(*buf.read(), 10);
+
+        // Cycle 2
+        buf.write(20);
+        buf.finish_cycle();
+        assert_eq!(*buf.read(), 20);
+    }
+
+    #[test]
+    fn stall_state_reset_after_finish_cycle() {
+        let mut buf = Buf::new(0);
+        buf.stall();
+        buf.finish_cycle();
+        // After finish_cycle, stall state is reset
+        buf.write(10);
+        buf.finish_cycle();
+        assert_eq!(*buf.read(), 10);
+    }
+
+    #[test]
+    fn clear_without_write() {
+        let mut buf = Buf::new(42);
+        buf.clear();
+        buf.finish_cycle();
+        assert_eq!(*buf.read(), 0);
+    }
+
+    #[test]
+    fn write_after_stall_and_clear() {
+        let mut buf = Buf::new(42);
+        buf.stall();
+        buf.clear();
+        buf.write(100);
+        buf.finish_cycle();
+        // Clear takes precedence over stall
+        assert_eq!(*buf.read(), 0);
+    }
+
+    #[test]
+    fn no_write_multiple_finish_cycles_no_change() {
+        let mut buf = Buf::new(42);
+        buf.finish_cycle();
+        buf.finish_cycle();
+        buf.finish_cycle();
+        assert_eq!(*buf.read(), 42);
+    }
+
+    #[test]
+    fn stall_after_bypass() {
+        let mut buf = Buf::new(42);
+        buf.write(10);
+        assert_eq!(*buf.read_bypassed(), 10);
+        buf.stall();
+        buf.finish_cycle();
+        assert_eq!(*buf.read(), 42);
+    }
+
+    #[cfg(debug_assertions)]
+    mod debug_only {
+        use super::*;
+
+        #[test]
+        #[should_panic(expected = "buffer has already been written to")]
+        fn double_write_panics() {
+            let mut buf = Buf::new(0);
+            buf.write(10);
+            buf.write(20); // second write in same cycle
+        }
+
+        #[test]
+        #[should_panic(expected = "buffer has already been written to")]
+        fn write_after_bypass_panics() {
+            let mut buf = Buf::new(0);
+            buf.write(10);
+            buf.read_bypassed();
+            buf.write(20); // write after bypass — double write check fires first
+        }
+
+        #[test]
+        fn bypassed_flag_reset_after_finish_cycle() {
+            let mut buf = Buf::new(0);
+            buf.write(10);
+            buf.read_bypassed();
+            buf.finish_cycle();
+            // In a new cycle, write should not panic
+            buf.write(20);
+            buf.finish_cycle();
+            assert_eq!(*buf.read(), 20);
+        }
+    }
+}
