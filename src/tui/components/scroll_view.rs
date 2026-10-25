@@ -23,8 +23,8 @@ mod state;
 /// # Examples
 ///
 /// ```rust
-/// use ratatui::{prelude::*, layout::Size, widgets::*};
-/// use tui_scrollview::{ScrollView, ScrollViewState};
+/// # use ratatui::{prelude::*, layout::Size, widgets::*};
+/// # use ferisc::tui::components::scroll_view::{ScrollView, ScrollViewState};
 ///
 /// # fn render(buf: &mut Buffer) {
 /// let mut scroll_view = ScrollView::new(Size::new(20, 20));
@@ -58,8 +58,8 @@ mod state;
 /// across frames.
 ///
 /// ```rust
-/// use ratatui::prelude::*;
-/// use tui_scrollview::{ScrollView, ScrollViewState};
+/// # use ratatui::prelude::*;
+/// # use ferisc::tui::components::scroll_view::{ScrollView, ScrollViewState};
 ///
 /// # fn terminal_draw(frame: &mut Frame, scroll_view: &ScrollView, state: &mut ScrollViewState) {
 /// frame.render_stateful_widget(scroll_view, frame.area(), state);
@@ -136,7 +136,7 @@ impl ScrollView<'_> {
     ///
     /// ```rust
     /// # use ratatui::{prelude::*, layout::Size, widgets::*};
-    /// # use tui_scrollview::ScrollView;
+    /// # use ferisc::tui::components::scroll_view::ScrollView;
     ///
     /// let mut scroll_view = ScrollView::new(Size::new(20, 20));
     /// Line::raw("Hello, world!").render(Rect::new(0, 0, 20, 1), scroll_view.buf_mut());
@@ -155,7 +155,7 @@ impl ScrollView<'_> {
     ///
     /// ```rust
     /// # use ratatui::{prelude::*, layout::Size, widgets::*};
-    /// # use tui_scrollview::{ScrollView, ScrollbarVisibility};
+    /// # use ferisc::tui::components::scroll_view::{ScrollView, ScrollbarVisibility};
     ///
     /// let mut scroll_view = ScrollView::new(Size::new(20, 20))
     ///     .vertical_scrollbar_visibility(ScrollbarVisibility::Always);
@@ -175,7 +175,7 @@ impl ScrollView<'_> {
     ///
     /// ```rust
     /// # use ratatui::{prelude::*, layout::Size, widgets::*};
-    /// # use tui_scrollview::{ScrollView, ScrollbarVisibility};
+    /// # use ferisc::tui::components::scroll_view::{ScrollView, ScrollbarVisibility};
     ///
     /// let mut scroll_view = ScrollView::new(Size::new(20, 20))
     ///     .horizontal_scrollbar_visibility(ScrollbarVisibility::Never);
@@ -198,7 +198,7 @@ impl ScrollView<'_> {
     ///
     /// ```rust
     /// # use ratatui::{prelude::*, layout::Size, widgets::*};
-    /// # use tui_scrollview::{ScrollView, ScrollbarVisibility};
+    /// # use ferisc::tui::components::scroll_view::{ScrollView, ScrollbarVisibility};
     ///
     /// let mut scroll_view =
     ///     ScrollView::new(Size::new(20, 20)).scrollbars_visibility(ScrollbarVisibility::Automatic);
