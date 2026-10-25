@@ -371,3 +371,189 @@ mod debug {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_impl() {
+        let pbuf: Pbuf<u32> = Pbuf::default();
+        assert_eq!(*pbuf.read(), 0);
+    }
+
+    #[test]
+    fn read_bypassed_with_no_writes_returns_current_value() {
+        let pbuf: Pbuf<u32> = Pbuf::new(42);
+        assert_eq!(*pbuf.read_bypassed(), 42);
+    }
+
+    #[test]
+    fn finish_cycle_with_no_writes_preserves_value() {
+        let mut pbuf: Pbuf<u32> = Pbuf::new(42);
+        pbuf.finish_cycle();
+        assert_eq!(*pbuf.read(), 42);
+    }
+
+    #[test]
+    fn write_after_stall_and_clear_is_ignored() {
+        let mut pbuf: Pbuf<u32> = Pbuf::new(42);
+        pbuf.stall();
+        pbuf.clear();
+        pbuf.write(100, 1u8);
+        pbuf.finish_cycle();
+        // Clear takes precedence over stall, but write after clear still goes
+        // through, and is simply ignored
+        assert_eq!(*pbuf.read(), 0);
+    }
+
+    #[test]
+    fn multiple_cycles_with_different_priorities() {
+        let mut pbuf = Pbuf::new(0u32);
+
+        // Cycle 1: highest priority wins
+        pbuf.write(10, 1u8);
+        pbuf.write(20, 2u8);
+        pbuf.finish_cycle();
+        assert_eq!(*pbuf.read(), 20);
+
+        // Cycle 2: new writes start fresh
+        pbuf.write(5, 0u8);
+        pbuf.finish_cycle();
+        assert_eq!(*pbuf.read(), 5);
+    }
+
+    #[test]
+    fn read_bypassed_returns_highest_priority_pending() {
+        let mut pbuf = Pbuf::new(0u32);
+        pbuf.write(10, 1u8);
+        pbuf.write(20, 2u8);
+        pbuf.write(5, 0u8);
+        // read_bypassed should return the highest priority pending value
+        assert_eq!(*pbuf.read_bypassed(), 20);
+    }
+
+    #[test]
+    fn stall_after_bypass() {
+        let mut pbuf = Pbuf::new(0u32);
+        pbuf.write(10, 1u8);
+        let _ = pbuf.read_bypassed();
+        pbuf.stall();
+        pbuf.finish_cycle();
+        assert_eq!(*pbuf.read(), 0);
+    }
+
+    #[test]
+    fn clear_without_write() {
+        let mut pbuf: Pbuf<u32> = Pbuf::new(42);
+        pbuf.clear();
+        pbuf.finish_cycle();
+        assert_eq!(*pbuf.read(), 0);
+    }
+
+    #[test]
+    fn clone_does_not_preserve_debug_state() {
+        let mut b1 = Pbuf::new(0u32);
+        b1.write(10, 1u8);
+        let mut b2 = b1.clone();
+        // b2 should be able to write with priority 1 without panic in debug builds,
+        // since debug state is reset on clone
+        b2.write(20, 1u8);
+        b2.finish_cycle();
+        assert_eq!(*b2.read(), 20);
+    }
+
+    #[test]
+    fn no_write_finish_cycle_no_change() {
+        let mut pbuf: Pbuf<u32> = Pbuf::new(99);
+        pbuf.finish_cycle();
+        pbuf.finish_cycle();
+        pbuf.finish_cycle();
+        assert_eq!(*pbuf.read(), 99);
+    }
+
+    #[test]
+    fn stall_then_finish_cycle_then_write() {
+        let mut pbuf = Pbuf::new(0u32);
+        pbuf.stall();
+        pbuf.finish_cycle();
+        // After finish_cycle, stall state is reset
+        pbuf.write(10, 1u8);
+        pbuf.finish_cycle();
+        assert_eq!(*pbuf.read(), 10);
+    }
+
+    #[cfg(debug_assertions)]
+    mod debug_only {
+        use super::*;
+
+        #[test]
+        #[should_panic(expected = "cannot write multiple values with the same priority")]
+        fn duplicate_priority_panics() {
+            let mut pbuf = Pbuf::new(0u32);
+            pbuf.write(10, 1u8);
+            pbuf.write(20, 1u8); // duplicate priority
+        }
+
+        #[test]
+        #[should_panic(expected = "the buffer has already been bypassed")]
+        fn write_after_bypass_with_lower_priority_panics() {
+            let mut pbuf = Pbuf::new(0u32);
+            pbuf.write(10, 1u8);
+            pbuf.read_bypassed();
+            pbuf.write(5, 0u8); // lower priority after bypass
+        }
+
+        #[test]
+        #[should_panic(expected = "cannot write multiple values with the same priority")]
+        fn write_after_bypass_with_equal_priority_panics() {
+            let mut pbuf = Pbuf::new(0u32);
+            pbuf.write(10, 1u8);
+            pbuf.read_bypassed();
+            pbuf.write(20, 1u8); // equal priority — duplicate priority check fires first
+        }
+
+        #[test]
+        #[should_panic(expected = "cannot write multiple values with the same priority")]
+        fn duplicate_priority_after_replacement_panics_in_non_debug_test() {
+            // Tests that a replaced priority is tracked in phist
+            let mut pbuf = Pbuf::new(0u32);
+            pbuf.write(10, 1u8);
+            pbuf.write(20, 2u8); // replaces, priority 1 goes to phist
+            pbuf.write(30, 1u8); // priority 1 is in phist, should panic
+        }
+
+        #[test]
+        fn higher_priority_after_bypass_is_allowed() {
+            let mut pbuf = Pbuf::new(0u32);
+            pbuf.write(10, 1u8);
+            pbuf.read_bypassed();
+            pbuf.write(20, 2u8); // higher priority, allowed
+            pbuf.finish_cycle();
+            assert_eq!(*pbuf.read(), 20);
+        }
+
+        #[test]
+        fn duplicate_priority_allowed_after_finish_cycle() {
+            let mut pbuf = Pbuf::new(0u32);
+            pbuf.write(10, 1u8);
+            pbuf.finish_cycle();
+            // After finish_cycle, debug state is reset
+            pbuf.write(20, 1u8); // same priority, but new cycle
+            pbuf.finish_cycle();
+            assert_eq!(*pbuf.read(), 20);
+        }
+
+        #[test]
+        fn bypassed_flag_reset_after_finish_cycle() {
+            let mut pbuf = Pbuf::new(0u32);
+            pbuf.write(10, 1u8);
+            pbuf.read_bypassed();
+            pbuf.finish_cycle();
+            // In a new cycle, lower priority writes should not panic
+            pbuf.write(5, 0u8);
+            pbuf.finish_cycle();
+            assert_eq!(*pbuf.read(), 5);
+        }
+    }
+}
