@@ -8,10 +8,11 @@ use self::queue::Queue;
 pub use self::substage::{Commit, Dispatch};
 use crate::core::{
     ee::rob::{self, Flushed},
-    uop::{Exception, commit::Dest},
+    uop::commit::Dest,
 };
-use crate::mem::{Bytes, LdReq, Mem, ReqData, Size, StReq};
+use crate::mem::{Bytes, ReqData, Size};
 use crate::seq::{Clearable, Sequential};
+use educe::Educe;
 use itertools::{EitherOrBoth, Itertools};
 use std::num::NonZeroUsize;
 
@@ -44,12 +45,13 @@ pub struct MemSubsystem<M: DMem> {
     fences: FenceQueue,
 }
 
-#[derive(Default)]
+#[derive(Educe)]
+#[educe(Default)]
 enum Req<M: DMem> {
-    #[default]
+    #[educe(Default)]
     None,
-    Ld(<M as Mem<LdReq<Exception>>>::Handle, ReadyEntry<Ld>),
-    St(<M as Mem<StReq<Exception>>>::Handle, ReadyEntry<St>),
+    Ld(ld_mem!(<M>::Handle), ReadyEntry<Ld>),
+    St(st_mem!(<M>::Handle), ReadyEntry<St>),
 }
 
 #[derive(Debug, Clone)]
