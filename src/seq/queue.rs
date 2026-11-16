@@ -53,7 +53,7 @@ use std::num::NonZeroUsize;
 /// assert_eq!(queue.iter().copied().collect::<Vec<_>>(), vec![2]);
 /// assert_eq!(queue2.iter().copied().collect::<Vec<_>>(), vec![1]);
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Queue<T> {
     buf: VecDeque<T>,
     size: NonZeroUsize,
@@ -61,7 +61,7 @@ pub struct Queue<T> {
 }
 
 /// Internal state tracking pending operations for the current clock cycle.
-#[derive(Debug, Clone, Educe)]
+#[derive(Debug, Educe)]
 #[educe(Default)]
 struct State<T> {
     /// Elements scheduled to be pushed at the end of the current cycle.
@@ -345,6 +345,16 @@ impl<T: Sequential> Queue<T> {
     }
 }
 
+impl<T: Clone> Clone for Queue<T> {
+    fn clone(&self) -> Self {
+        Self {
+            buf: self.buf.clone(),
+            size: self.size,
+            state: Default::default(),
+        }
+    }
+}
+
 impl<T> Sequential for Queue<T> {
     /// Marks the end of the clock cycle, finalizing any outstanding operations.
     ///
@@ -356,28 +366,29 @@ impl<T> Sequential for Queue<T> {
     ///
     /// </div>
     fn finish_cycle(&mut self) {
-        use std::mem::take;
+        let State {
+            mut pushed,
+            popped,
+            cleared,
+            drained,
+        } = std::mem::take(&mut self.state);
+
+        // Clear
+        if cleared {
+            self.buf.clear();
+            return;
+        }
 
         // Drain back
-        if let Some(drained) = self.state.drained.take() {
+        if let Some(drained) = drained {
             self.buf.truncate(self.buf.len() - drained.get());
         }
 
         // Pop
-        {
-            let popped = take(&mut self.state.popped);
-            drop(self.buf.drain(..popped));
-        }
+        drop(self.buf.drain(..popped));
 
         // Push
-        {
-            self.buf.append(&mut self.state.pushed);
-        }
-
-        // Clear
-        if take(&mut self.state.cleared) {
-            self.buf.clear();
-        }
+        self.buf.append(&mut pushed);
     }
 }
 
@@ -505,6 +516,534 @@ mod push {
         fn finish(&mut self, extra: Self::Extra) {
             self.new.push_back(extra);
             debug_assert!(self.new.len() <= self.max_size);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use self::helpers::*;
+    use super::*;
+    use crate::seq::IntoPipelineStage;
+
+    mod helpers {
+        use super::*;
+        use std::convert::Infallible;
+
+        pub fn make_queue<T>() -> Queue<T> {
+            Queue::new(NonZeroUsize::new(4).unwrap())
+        }
+
+        pub fn make_queue_with<T, I>(items: I) -> Queue<T>
+        where
+            I: IntoIterator<Item = T, IntoIter: ExactSizeIterator>,
+        {
+            let iter = items.into_iter();
+            let mut queue = Queue::new(NonZeroUsize::new(iter.len()).expect("should not be empty"));
+            init_queue_with(&mut queue, iter);
+            queue
+        }
+
+        pub const fn nz(n: usize) -> NonZeroUsize {
+            NonZeroUsize::new(n).unwrap()
+        }
+
+        include!("queue/test_helpers.rs");
+
+        #[derive(Debug)]
+        pub struct Consumer<'a, T>(pub &'a mut Vec<T>);
+
+        impl<'a, T> Substage for Consumer<'a, T> {
+            type In = T;
+            type Out = ();
+            type Extra = T;
+            type Err = Infallible;
+
+            fn start(&mut self, input: Self::In) -> Outcome<Self::Out, Self::Extra, Self::Err> {
+                Outcome::Ok((), input)
+            }
+
+            fn finish(&mut self, extra: Self::Extra) {
+                self.0.push(extra);
+            }
+        }
+    }
+
+    #[test]
+    fn clone_does_not_preserve_pending_state() {
+        let mut queue = make_queue();
+        Producer([10].into_iter())
+            .into_pipeline_stage()
+            .substage(queue.push())
+            .execute();
+
+        // Pending push is not yet committed
+        let mut cloned = queue.clone();
+        assert_eq!(
+            queue.iter().copied().collect::<Vec<_>>(),
+            cloned.iter().copied().collect::<Vec<_>>(),
+        );
+        assert_eq!(queue.size(), cloned.size());
+
+        queue.finish_cycle();
+        cloned.finish_cycle();
+        // Original executed the push; clone did not
+        assert_eq!(queue.iter().copied().collect::<Vec<_>>(), vec![10]);
+        assert_eq!(cloned.iter().len(), 0);
+    }
+
+    #[test]
+    fn size_independent_of_length() {
+        const SIZE: NonZeroUsize = nz(4);
+        let mut queue = Queue::new(SIZE);
+        Producer((1..).into_iter().take(SIZE.get() - 1))
+            .into_pipeline_stage()
+            .substage(queue.push())
+            .execute();
+
+        assert_eq!(queue.size(), SIZE);
+        assert_ne!(queue.size().get(), queue.iter().len());
+
+        queue.finish_cycle();
+        assert_eq!(queue.size(), SIZE);
+        assert_ne!(queue.size().get(), queue.iter().len());
+    }
+
+    #[test]
+    fn iter_after_drain_back_before_finish() {
+        let mut queue = make_queue_with([1, 2, 3]);
+
+        let drained: Vec<_> = queue.drain_back(1).copied().collect();
+        assert_eq!(queue.iter().copied().collect::<Vec<_>>(), vec![1, 2, 3]);
+        assert_eq!(drained, vec![3]);
+
+        queue.finish_cycle();
+        assert_eq!(queue.iter().copied().collect::<Vec<_>>(), vec![1, 2]);
+    }
+
+    #[test]
+    fn pop_on_empty_queue() {
+        let mut queue: Queue<u32> = make_queue();
+        let mut out = Vec::new();
+        queue
+            .pop(nz(2))
+            .into_pipeline_stage()
+            .copied()
+            .substage(Consumer(&mut out))
+            .execute();
+        queue.finish_cycle();
+
+        assert_eq!(queue.iter().len(), 0);
+        assert_eq!(out.len(), 0);
+    }
+
+    #[test]
+    fn pop_width_larger_than_available() {
+        let mut queue = Queue::new(nz(2));
+        Producer([1, 2].into_iter())
+            .into_pipeline_stage()
+            .substage(queue.push())
+            .execute();
+        queue.finish_cycle();
+
+        let mut popped = Vec::new();
+        queue
+            .pop(nz(10))
+            .into_pipeline_stage()
+            .copied()
+            .substage(Consumer(&mut popped))
+            .execute();
+        queue.finish_cycle();
+        assert_eq!(popped, vec![1, 2]);
+        assert_eq!(queue.iter().len(), 0);
+    }
+
+    #[test]
+    fn pop_returns_references_to_existing_elements() {
+        let mut queue = make_queue_with([String::from("hello")]);
+
+        let expected = queue.buf.front().expect("queue should not be empty") as *const _;
+        let mut popped = Vec::new();
+        queue
+            .pop(nz(1))
+            .into_pipeline_stage()
+            .substage(Consumer(&mut popped))
+            .execute();
+
+        let popped = popped.pop().expect("popped should not be empty");
+        assert!(std::ptr::addr_eq(expected, popped));
+    }
+
+    #[test]
+    fn push_after_pop_in_same_cycle() {
+        let mut queue = make_queue_with([1]);
+
+        // Pop 1 element and push 1 element in the same cycle
+        let mut popped = Vec::new();
+        queue
+            .pop(nz(1))
+            .into_pipeline_stage()
+            .copied()
+            .substage(Consumer(&mut popped))
+            .execute();
+        Producer([2].into_iter())
+            .into_pipeline_stage()
+            .substage(queue.push())
+            .execute();
+        queue.finish_cycle();
+        assert_eq!(popped, vec![1]);
+        assert_eq!(queue.iter().copied().collect::<Vec<_>>(), vec![2]);
+    }
+
+    #[test]
+    fn push_stop_at_capacity() {
+        let mut queue = Queue::new(nz(2));
+        Producer([1, 2, 3].into_iter())
+            .into_pipeline_stage()
+            .substage(queue.push())
+            .execute();
+        queue.finish_cycle();
+        assert_eq!(queue.iter().copied().collect::<Vec<_>>(), vec![1, 2]);
+    }
+
+    #[test]
+    fn push_uses_popped_capacity() {
+        // When elements are popped in the same cycle, push can use that freed capacity.
+        let mut queue = Queue::new(nz(2));
+        Producer([1, 2].into_iter())
+            .into_pipeline_stage()
+            .substage(queue.push())
+            .execute();
+        queue.finish_cycle();
+
+        let mut popped = Vec::new();
+        queue
+            .pop(nz(1))
+            .into_pipeline_stage()
+            .copied()
+            .substage(Consumer(&mut popped))
+            .execute();
+        let mut pushed = Vec::new();
+        Producer([3, 4].into_iter())
+            .into_pipeline_stage()
+            .substage(queue.push())
+            .substage(Consumer(&mut pushed))
+            .execute();
+        queue.finish_cycle();
+        assert_eq!(popped, vec![1]);
+        assert_eq!(queue.iter().copied().collect::<Vec<_>>(), vec![2, 3]);
+    }
+
+    #[test]
+    fn multi_cycle_push_and_pop() {
+        let mut queue = make_queue();
+
+        // Cycle 1
+        Producer([1, 2].into_iter())
+            .into_pipeline_stage()
+            .substage(queue.push())
+            .execute();
+        queue.finish_cycle();
+        assert_eq!(queue.iter().copied().collect::<Vec<_>>(), vec![1, 2]);
+
+        // Cycle 2
+        let mut popped = Vec::new();
+        queue
+            .pop(nz(1))
+            .into_pipeline_stage()
+            .copied()
+            .substage(Consumer(&mut popped))
+            .execute();
+        Producer([3].into_iter())
+            .into_pipeline_stage()
+            .substage(queue.push())
+            .execute();
+        queue.finish_cycle();
+        assert_eq!(popped, vec![1]);
+        assert_eq!(queue.iter().copied().collect::<Vec<_>>(), vec![2, 3]);
+    }
+
+    #[test]
+    fn drain_back_with_zero_count() {
+        let mut queue = make_queue_with([1]);
+
+        {
+            let drained = queue.drain_back(0);
+            assert_eq!(drained.len(), 0);
+        }
+        queue.finish_cycle();
+        assert_eq!(queue.iter().copied().collect::<Vec<_>>(), vec![1]);
+    }
+
+    #[test]
+    fn drain_back_more_than_available() {
+        let mut queue = make_queue_with([1, 2]);
+
+        let drained: Vec<_> = queue.drain_back(10).copied().collect();
+        queue.finish_cycle();
+        assert_eq!(drained, vec![2, 1]);
+        assert_eq!(queue.iter().len(), 0);
+    }
+
+    #[test]
+    fn drain_back_on_empty_queue() {
+        let mut queue: Queue<u32> = make_queue();
+        let drained = queue.drain_back(2);
+        assert_eq!(drained.len(), 0);
+    }
+
+    #[test]
+    fn drain_back_reverses_order() {
+        let mut queue = make_queue_with([1, 2, 3]);
+
+        let drained: Vec<_> = queue.drain_back(2).copied().collect();
+        assert_eq!(drained, vec![3, 2]); // reverse order
+        queue.finish_cycle();
+        assert_eq!(queue.iter().copied().collect::<Vec<_>>(), vec![1]);
+    }
+
+    #[test]
+    fn clear_applied_after_finish_cycle() {
+        let mut queue = make_queue_with([1, 2]);
+
+        queue.clear();
+        assert_eq!(queue.iter().copied().collect::<Vec<_>>(), vec![1, 2]);
+        queue.finish_cycle();
+        assert_eq!(queue.iter().len(), 0);
+    }
+
+    #[test]
+    fn clear_overrides_push() {
+        let mut queue = make_queue();
+        Producer([1].into_iter())
+            .into_pipeline_stage()
+            .substage(queue.push())
+            .execute();
+        queue.clear();
+        queue.finish_cycle();
+        assert_eq!(queue.iter().len(), 0);
+    }
+
+    #[test]
+    fn clear_overrides_pop() {
+        let mut queue = make_queue_with([1, 2]);
+
+        let mut popped = Vec::new();
+        queue
+            .pop(nz(1))
+            .into_pipeline_stage()
+            .copied()
+            .substage(Consumer(&mut popped))
+            .execute();
+        queue.clear();
+        queue.finish_cycle();
+        assert_eq!(popped, vec![1]);
+        assert_eq!(queue.iter().len(), 0);
+    }
+
+    #[test]
+    fn clear_overrides_drain() {
+        let mut queue = make_queue_with([1, 2]);
+
+        let drained: Vec<_> = queue.drain_back(1).copied().collect();
+        queue.clear();
+        queue.finish_cycle();
+        assert_eq!(drained, vec![2]);
+        assert_eq!(queue.iter().len(), 0);
+    }
+
+    #[test]
+    fn finish_cycle_with_no_operations() {
+        let mut queue: Queue<u32> = make_queue();
+        queue.finish_cycle();
+        queue.finish_cycle();
+        assert_eq!(queue.iter().len(), 0);
+    }
+
+    #[test]
+    fn finish_cycle_propagates() {
+        use crate::seq::Buf;
+
+        let mut queue = Queue::new(nz(2));
+        let mut buf = Buf::new(1);
+        buf.write(2);
+        Producer([buf].into_iter())
+            .into_pipeline_stage()
+            .substage(queue.push())
+            .execute();
+        queue.finish_cycle();
+        assert_eq!(
+            queue.iter().map(Buf::read_copied).collect::<Vec<_>>(),
+            vec![2]
+        );
+    }
+
+    #[test]
+    fn sequential_finish_cycle_does_not_propagate() {
+        use crate::seq::Buf;
+
+        let mut queue = Queue::new(nz(2));
+        let mut buf = Buf::new(1);
+        buf.write(2);
+        Producer([buf].into_iter())
+            .into_pipeline_stage()
+            .substage(queue.push())
+            .execute();
+        Sequential::finish_cycle(&mut queue);
+        assert_eq!(
+            queue.iter().map(Buf::read_copied).collect::<Vec<_>>(),
+            vec![1]
+        );
+    }
+
+    #[cfg(debug_assertions)]
+    mod debug_assertions {
+        use super::*;
+
+        #[test]
+        #[should_panic(expected = "cannot pop more than once in a clock cycle")]
+        fn double_pop_panics() {
+            let mut queue = make_queue_with([1, 2]);
+
+            let mut out1 = Vec::new();
+            queue
+                .pop(nz(1))
+                .into_pipeline_stage()
+                .copied()
+                .substage(Consumer(&mut out1))
+                .execute();
+
+            let mut out2 = Vec::new();
+            queue
+                .pop(nz(1))
+                .into_pipeline_stage()
+                .copied()
+                .substage(Consumer(&mut out2))
+                .execute();
+        }
+
+        #[test]
+        #[should_panic(expected = "cannot push more than once in a clock cycle")]
+        fn double_push_panics() {
+            let mut queue = make_queue();
+            Producer([1].into_iter())
+                .into_pipeline_stage()
+                .substage(queue.push())
+                .execute();
+
+            Producer([2].into_iter())
+                .into_pipeline_stage()
+                .substage(queue.push())
+                .execute();
+        }
+
+        #[test]
+        #[should_panic(expected = "cannot drain more than once in a clock cycle")]
+        fn double_drain_back_panics() {
+            let mut queue = make_queue_with([1, 2]);
+
+            let _ = queue.drain_back(1);
+            let _ = queue.drain_back(1);
+        }
+
+        #[test]
+        fn double_clear_does_not_panic() {
+            let mut queue = make_queue_with([1]);
+
+            queue.clear();
+            queue.clear();
+        }
+
+        #[test]
+        #[should_panic(expected = "some elements are both popped and drained")]
+        fn pop_and_drain_overlap_panics() {
+            let mut queue = make_queue_with([1, 2]);
+
+            // Pop first
+            queue
+                .pop(nz(2))
+                .into_pipeline_stage()
+                .copied()
+                .substage(Consumer(&mut Vec::new()))
+                .execute();
+
+            // Drain second
+            let _ = queue.drain_back(1);
+        }
+
+        #[test]
+        #[should_panic(expected = "some elements are both popped and drained")]
+        fn drain_and_pop_panics() {
+            let mut queue = make_queue_with([1, 2]);
+
+            // Drain first
+            let _ = queue.drain_back(1);
+
+            // Pop second
+            queue
+                .pop(nz(2))
+                .into_pipeline_stage()
+                .copied()
+                .substage(Consumer(&mut Vec::new()))
+                .execute();
+        }
+
+        #[test]
+        fn pop_allowed_after_finish_cycle() {
+            let mut queue = make_queue_with([1, 2]);
+
+            // First pop: pop 1 element
+            let mut out1 = Vec::new();
+            queue
+                .pop(nz(1))
+                .into_pipeline_stage()
+                .copied()
+                .substage(Consumer(&mut out1))
+                .execute();
+            queue.finish_cycle();
+            assert_eq!(out1, vec![1]);
+            assert_eq!(queue.iter().copied().collect::<Vec<_>>(), vec![2]);
+
+            let mut out2 = Vec::new();
+            queue
+                .pop(nz(1))
+                .into_pipeline_stage()
+                .copied()
+                .substage(Consumer(&mut out2))
+                .execute();
+            queue.finish_cycle();
+            assert_eq!(out2, vec![2]);
+            assert_eq!(queue.iter().len(), 0);
+        }
+
+        #[test]
+        fn push_allowed_after_finish_cycle() {
+            let mut queue = make_queue();
+            Producer([1].into_iter())
+                .into_pipeline_stage()
+                .substage(queue.push())
+                .execute();
+            queue.finish_cycle();
+
+            Producer([2].into_iter())
+                .into_pipeline_stage()
+                .substage(queue.push())
+                .execute();
+            queue.finish_cycle();
+            assert_eq!(queue.iter().copied().collect::<Vec<_>>(), vec![1, 2]);
+        }
+
+        #[test]
+        fn drain_allowed_after_finish_cycle() {
+            let mut queue = make_queue_with([1, 2]);
+
+            let drained: Vec<_> = queue.drain_back(1).copied().collect();
+            assert_eq!(drained, vec![2]);
+
+            queue.finish_cycle();
+
+            let drained: Vec<_> = queue.drain_back(1).copied().collect();
+            assert_eq!(drained, vec![1]);
         }
     }
 }
