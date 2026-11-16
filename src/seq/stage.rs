@@ -1,8 +1,6 @@
 //TODO Better docs with examples
-use self::substage::{Cloned, Compose, Copied, Map};
+use self::substage::{Cloned, Compose, Copied, Map, MapErr};
 pub use self::substage::{Outcome, SimpleSubStage, Substage};
-use std::convert::Infallible;
-use unwrap_infallible::UnwrapInfallible;
 
 pub mod substage;
 
@@ -32,12 +30,11 @@ impl<S> PipelineStage<S> {
     /// The substages are applied sequentially to the elements processed by the
     /// pipeline stage in the order of their definition. For more information on
     /// the execution guarantees, see the [`PipelineStage::try_execute`] method.
-    pub fn substage<R, T, E>(self, substage: R) -> PipelineStage<Compose<S, R, E>>
+    pub fn substage<R, T, E>(self, substage: R) -> PipelineStage<Compose<S, R>>
     where
-        S: Substage<Out = T, Err = E>,
+        S: Substage<Out = T, Err: Into<E>>,
         R: Substage<In = T, Err = E>,
     {
-        //TODO Add facilities to convert errors when necessary
         PipelineStage(Compose::new(self.0, substage))
     }
 
@@ -49,6 +46,15 @@ impl<S> PipelineStage<S> {
         F: Fn(T) -> U,
     {
         PipelineStage(Map::new(self.0, f))
+    }
+
+    /// Converts the pipeline stage's error to another type.
+    pub fn map_err<T, U, F>(self, f: F) -> PipelineStage<MapErr<S, F>>
+    where
+        S: Substage<Err = T>,
+        F: Fn(T) -> U,
+    {
+        PipelineStage(MapErr::new(self.0, f))
     }
 
     /// Adds a new infallible [`Substage`] which clones the elements,
@@ -71,7 +77,6 @@ impl<S> PipelineStage<S> {
         self.map(|t| *t)
     }
 
-    //TODO Example with a queue
     /// Executes the pipeline stage.
     ///
     /// The execution proceeds by repeatedly trying to execute all substages -
@@ -95,6 +100,7 @@ impl<S> PipelineStage<S> {
         }
     }
 
+    //TODO Example with a queue
     /// Executes the pipeline stage.
     ///
     /// This is a more restricted version of [`PipelineStage::try_execute`],
@@ -102,9 +108,9 @@ impl<S> PipelineStage<S> {
     #[inline(always)]
     pub fn execute(self)
     where
-        S: Substage<In = (), Out = (), Err = Infallible>,
+        S: Substage<In = (), Out = (), Err = !>,
     {
-        self.try_execute().unwrap_infallible()
+        let Ok(()) = self.try_execute();
     }
 }
 
